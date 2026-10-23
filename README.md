@@ -12,6 +12,7 @@ para ver peleas y eventos viejos sin saber si terminaron por finish o por decisi
 - **Barra de escala fija** (90 min por defecto; click en la escala para elegir 15/30/60/90 min). Como el largo de la
   barra no depende del video, no revela nada. Al pasar 1:30:00 pasa sola a la ventana siguiente; con ‹ › se puede mirar
   la anterior o la siguiente.
+- **Barra táctil**: en iPhone/iPad (o con el control de la tele) arrastrar muestra la miniatura y al soltar salta ahí.
 - **Miniaturas al pasar el mouse** sobre la barra, leídas del mismo archivo `.bif` que usa Fight Pass.
   Ojo: si el mouse está más allá del final aparece "sin imagen", y eso indica que el video ya terminó.
 - **Teclado**: ←/→ 10 s · Shift 30 s · Ctrl 1 min · Ctrl+Shift 5 min · `T` muestra/oculta el tiempo transcurrido.
@@ -28,6 +29,12 @@ aunque los videos de archivo probados no lo usan.
 
 `serve.py` sirve la carpeta en `http://127.0.0.1:8765` con `charset=utf-8`, para instalar el script desde una copia local.
 
+## Para otras apps (la de la tele)
+
+El script expone `window.fpnsApi`: `isPlayer()`, `isPaused()`, `jump(seg)`, `togglePlay()`,
+`previewMove(seg)` / `previewCommit()` / `previewCancel()` / `inPreview()` (mover una miniatura por la barra y confirmar),
+`toggleElapsed()` y `wake()` (muestra los controles).
+
 ## No usar
 
 - El Picture-in-Picture del navegador: esa ventana tiene su propia barra con el tiempo.
@@ -35,4 +42,4 @@ aunque los videos de archivo probados no lo usan.
 
 ## Probado
 
-LibreWolf 158 en Windows 11, con event replays de UFC 22 (1999), UFC 199 (2016) y UFC 239 (2019).
+LibreWolf 158 en Windows 11 y LibreWolf 156 en Steam Deck, con event replays de UFC 22 (1999), UFC 199 (2016) y UFC 239 (2019).

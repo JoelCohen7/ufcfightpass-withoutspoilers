@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Fight Pass sin spoilers
 // @namespace    joel.fightpass.nospoilers
-// @version      1.0.3
+// @version      1.1.0
 // @description  Oculta la duración y el tiempo restante en UFC Fight Pass. Agrega saltos de ±10 s / 30 s / 1 min / 5 min y una barra de escala fija con miniaturas.
 // @match        https://www.ufcfightpass.com/*
 // @match        https://ufcfightpass.com/*
@@ -55,7 +55,7 @@
     .fpns-scale { cursor: pointer; text-decoration: underline dotted; }
     .fpns-page { background: none; border: none; color: #fff; cursor: pointer; font-size: 16px; padding: 0 4px; opacity: .8; }
     .fpns-page:hover { opacity: 1; }
-    .fpns-bar { position: relative; flex: 1; height: 18px; cursor: pointer; }
+    .fpns-bar { position: relative; flex: 1; height: 18px; cursor: pointer; touch-action: none; }
     .fpns-track { position: absolute; left: 0; right: 0; top: 7px; height: 4px; background: rgba(255,255,255,.3); border-radius: 2px; }
     .fpns-bar:hover .fpns-track { top: 6px; height: 6px; }
     .fpns-fill { position: absolute; left: 0; top: 0; bottom: 0; background: #d20a0a; border-radius: 2px; }
@@ -224,7 +224,7 @@
       </div>`;
 
     // Que los clicks del panel no lleguen al reproductor (que pausaría)
-    ['click', 'mousedown', 'pointerdown', 'dblclick', 'touchstart'].forEach((ev) =>
+    ['click', 'mousedown', 'mouseup', 'pointerdown', 'pointerup', 'dblclick', 'touchstart', 'touchend'].forEach((ev) =>
       p.addEventListener(ev, (e) => e.stopPropagation()));
 
     p.querySelectorAll('[data-jump]').forEach((b) =>
@@ -240,38 +240,95 @@
     });
     p.querySelector('.fpns-elapsed').addEventListener('click', () => toggleElapsed());
 
+    // Mouse: la miniatura sigue al puntero y arrastrar va moviendo el video.
+    // Dedo (iPhone/iPad, tele): arrastrar solo muestra la miniatura; al soltar salta ahí.
     const bar = p.querySelector('.fpns-bar');
-    const tip = p.querySelector('.fpns-tip');
-    const tipImg = tip.querySelector('img');
-    const tipNo = tip.querySelector('.fpns-noimg');
-    const tipLbl = tip.querySelector('span');
     const timeAtX = (clientX) => {
       const r = bar.getBoundingClientRect();
-      const f = Math.min(1, Math.max(0, (clientX - r.left) / r.width));
-      return { t: (curPage() + f) * windowSec, x: f * r.width };
+      return (curPage() + Math.min(1, Math.max(0, (clientX - r.left) / r.width))) * windowSec;
     };
-    let dragging = false;
-    bar.addEventListener('mousemove', (e) => {
-      const { t, x } = timeAtX(e.clientX);
-      const u = thumbAt(t);
-      if (u) { tipImg.src = u; tipImg.style.display = ''; tipNo.style.display = 'none'; }
-      else { tipImg.style.display = 'none'; tipNo.style.display = ''; }
-      tipLbl.textContent = fmt(t);
-      tip.style.left = x + 'px';
-      tip.style.display = 'block';
-      if (dragging) seekTo(t);
+    let drag = null;               // { type, page } mientras hay un botón/dedo apoyado
+    bar.addEventListener('pointermove', (e) => {
+      const t = timeAtX(e.clientX);
+      showTip(t);
+      if (drag && drag.type === 'mouse') { seekTo(t); manualPage = drag.page; }
     });
-    bar.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
-    bar.addEventListener('mousedown', (e) => {
+    bar.addEventListener('pointerleave', () => { if (!drag) hideTip(); });
+    bar.addEventListener('pointerdown', (e) => {
       if (e.button !== 0) return;
-      dragging = true;
-      const page = curPage();
-      seekTo(timeAtX(e.clientX).t);
-      manualPage = page;           // mientras arrastrás no cambia la ventana
-      const up = () => { dragging = false; manualPage = null; window.removeEventListener('mouseup', up, true); };
-      window.addEventListener('mouseup', up, true);
+      drag = { type: e.pointerType, page: curPage() };   // mientras arrastrás no cambia la ventana
+      try { bar.setPointerCapture(e.pointerId); } catch {}
+      const t = timeAtX(e.clientX);
+      showTip(t);
+      if (drag.type === 'mouse') { seekTo(t); manualPage = drag.page; }
     });
+    const endDrag = (e, commit) => {
+      if (!drag) return;
+      const touch = drag.type !== 'mouse';
+      drag = null;
+      manualPage = null;
+      if (touch) {
+        if (commit) seekTo(timeAtX(e.clientX));
+        hideTip();
+      }
+      render();
+    };
+    bar.addEventListener('pointerup', (e) => endDrag(e, true));
+    bar.addEventListener('pointercancel', (e) => endDrag(e, false));
     return p;
+  }
+
+  // Miniatura y minuto sobre la barra para el segundo t (cambia de ventana si hace falta).
+  function showTip(t) {
+    if (!panel) return;
+    const tip = panel.querySelector('.fpns-tip');
+    const img = tip.querySelector('img');
+    const noImg = tip.querySelector('.fpns-noimg');
+    const u = thumbAt(t);
+    if (u) { img.src = u; img.style.display = ''; noImg.style.display = 'none'; }
+    else { img.style.display = 'none'; noImg.style.display = ''; }
+    tip.querySelector('span').textContent = fmt(t);
+    tip.style.left = Math.min(1, Math.max(0, t / windowSec - curPage())) * 100 + '%';
+    tip.style.display = 'block';
+  }
+  function hideTip() {
+    if (panel) panel.querySelector('.fpns-tip').style.display = 'none';
+  }
+
+  // ---------- Modo vista previa (para control remoto): mover la miniatura y confirmar ----------
+  let previewT = null;
+  function previewMove(sec) {
+    if (!video) return;
+    if (previewT === null) previewT = video.currentTime;
+    previewT = Math.max(0, previewT + sec);
+    manualPage = Math.floor(previewT / windowSec);
+    render();
+    showTip(previewT);
+  }
+  function previewCommit() {
+    if (previewT === null) return false;
+    const t = previewT;
+    previewT = null;
+    hideTip();
+    seekTo(t);
+    render();
+    return true;
+  }
+  function previewCancel() {
+    if (previewT === null) return false;
+    previewT = null;
+    hideTip();
+    manualPage = null;
+    render();
+    return true;
+  }
+
+  // Muestra los controles del reproductor como si se hubiera movido el mouse.
+  function wake() {
+    const host = document.querySelector('.dice-player-background');
+    if (!host) return;
+    const r = host.getBoundingClientRect();
+    host.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 }));
   }
 
   function render() {
@@ -330,6 +387,20 @@
       render();
     }
   }
+
+  // Para la app de la tele (o cualquier otro control): window.fpnsApi
+  window.fpnsApi = {
+    isPlayer: () => !!(getVideo() && document.querySelector('.dice-player-control')),
+    isPaused: () => { const v = getVideo(); return !v || v.paused; },
+    jump: (sec) => { wake(); jump(sec); },
+    togglePlay: () => { const v = getVideo(); if (!v) return; wake(); if (v.paused) v.play(); else v.pause(); },
+    previewMove: (sec) => { wake(); previewMove(sec); },
+    previewCommit: () => { wake(); return previewCommit(); },
+    previewCancel: () => previewCancel(),
+    inPreview: () => previewT !== null,
+    toggleElapsed: () => { wake(); toggleElapsed(); },
+    wake,
+  };
 
   // ---------- 5) Teclado ----------
   // ←/→ 10 s · Shift 30 s · Ctrl 1 min · Ctrl+Shift 5 min · T muestra/oculta el tiempo transcurrido
