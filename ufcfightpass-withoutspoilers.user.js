@@ -1,13 +1,13 @@
 // ==UserScript==
-// @name         Fight Pass sin spoilers
+// @name         UFC Fight Pass Without Spoilers
 // @namespace    joel.fightpass.nospoilers
-// @version      1.1.0
-// @description  Oculta la duración y el tiempo restante en UFC Fight Pass. Agrega saltos de ±10 s / 30 s / 1 min / 5 min y una barra de escala fija con miniaturas.
+// @version      1.2.0
+// @description  Hides the duration and time remaining on UFC Fight Pass. Adds ±10 s / 30 s / 1 min / 5 min jumps and a fixed-scale seek bar with thumbnails.
 // @match        https://www.ufcfightpass.com/*
 // @match        https://ufcfightpass.com/*
 // @homepageURL  https://github.com/JoelCohen7/ufcfightpass-withoutspoilers
-// @updateURL    https://raw.githubusercontent.com/JoelCohen7/ufcfightpass-withoutspoilers/main/fightpass-sin-spoilers.user.js
-// @downloadURL  https://raw.githubusercontent.com/JoelCohen7/ufcfightpass-withoutspoilers/main/fightpass-sin-spoilers.user.js
+// @updateURL    https://raw.githubusercontent.com/JoelCohen7/ufcfightpass-withoutspoilers/main/ufcfightpass-withoutspoilers.user.js
+// @downloadURL  https://raw.githubusercontent.com/JoelCohen7/ufcfightpass-withoutspoilers/main/ufcfightpass-withoutspoilers.user.js
 // @run-at       document-start
 // @grant        none
 // @noframes
@@ -18,8 +18,8 @@
   if (window.__fpns) return;
   window.__fpns = true;
 
-  // ---------- Ajustes ----------
-  const WINDOWS_MIN = [15, 30, 60, 90];          // escalas posibles de la barra (minutos); click en la escala para cambiar
+  // ---------- Settings ----------
+  const WINDOWS_MIN = [15, 30, 60, 90];          // possible bar scales (minutes); click the scale label to cycle
   const DEFAULT_WINDOW_MIN = 90;
   const JUMPS = [-300, -60, -30, -10, 10, 30, 60, 300];
   const LS_WIN = 'fpns:windowMin';
@@ -31,7 +31,7 @@
   let windowSec = (WINDOWS_MIN.includes(lsGet(LS_WIN, DEFAULT_WINDOW_MIN)) ? lsGet(LS_WIN, DEFAULT_WINDOW_MIN) : DEFAULT_WINDOW_MIN) * 60;
   let showElapsed = lsGet(LS_SHOWTIME, true);
 
-  // ---------- 1) Ocultar todo lo que muestra duración ----------
+  // ---------- 1) Hide everything that shows a duration ----------
   const css = `
     .dice-player-control .ds-seek-bar,
     .dice-player-control .time,
@@ -81,8 +81,8 @@
   };
   addStyle();
 
-  // Cualquier texto que sea solo una duración fuera de nuestro panel se oculta:
-  // "08:05", "02:34:10", "-7:46" (tarjetas y reproductor) o "9m 26s", "2h 56m", "15m" (búsqueda).
+  // Any text that is only a duration, outside our own panel, gets hidden:
+  // "08:05", "02:34:10", "-7:46" (cards and player) or "9m 26s", "2h 56m", "15m" (search).
   const TIME_RE = /^\s*(-?\d{1,2}:\d{2}(:\d{2})?|(\d+\s*(h|hr|hrs|m|min|mins|s|sec|secs)\.?\s*){1,3})\s*$/i;
   const scrubText = (root) => {
     if (!root) return;
@@ -96,14 +96,14 @@
     }
   };
 
-  // ---------- 2) Que el sistema (Windows) no reciba la duración ----------
+  // ---------- 2) Don't hand the duration to the OS media controls ----------
   try {
     if (navigator.mediaSession && navigator.mediaSession.setPositionState) {
       navigator.mediaSession.setPositionState = function () {};
     }
   } catch {}
 
-  // ---------- 3) Miniaturas (archivo .bif) ----------
+  // ---------- 3) Thumbnails (.bif file) ----------
   let bifUrl = null;
   let bif = null;           // { interval, frames: [{t, start, end}], buf }
   const imgCache = new Map();
@@ -143,7 +143,7 @@
     } catch {}
   }
 
-  // Devuelve la URL de la miniatura para el segundo t, o null si no hay.
+  // Returns the thumbnail URL for second t, or null if there is none.
   function thumbAt(t) {
     if (!bif || !bif.frames.length) return null;
     const i = Math.floor(t / bif.interval);
@@ -155,7 +155,7 @@
     return imgCache.get(i);
   }
 
-  // ---------- 4) Panel propio ----------
+  // ---------- 4) Our own panel ----------
   const fmt = (s) => {
     s = Math.max(0, Math.floor(s));
     const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60;
@@ -165,7 +165,7 @@
 
   let video = null;
   let panel = null;
-  let manualPage = null;    // null = la página la decide el tiempo actual
+  let manualPage = null;    // null = the current time decides the page
   let toastTimer = null;
 
   const getVideo = () => document.querySelector('#dice-player video') || document.querySelector('video');
@@ -207,23 +207,23 @@
       <div class="fpns-row keep-overlay-on-hover">
         ${JUMPS.map((j) => `<button class="fpns-btn" data-jump="${j}">${jumpLabel(j)}</button>`).join('')}
         <span class="fpns-spacer"></span>
-        <span class="fpns-elapsed" title="Tiempo transcurrido (click o T para mostrar/ocultar)"></span>
+        <span class="fpns-elapsed" title="Elapsed time (click or T to show/hide)"></span>
       </div>
       <div class="fpns-barwrap keep-overlay-on-hover">
-        <button class="fpns-page" data-page="-1" title="Ventana anterior">&lsaquo;</button>
+        <button class="fpns-page" data-page="-1" title="Previous window">&lsaquo;</button>
         <span class="fpns-edge fpns-edge-l"></span>
         <div class="fpns-bar keep-overlay-on-hover">
           <div class="fpns-track"><div class="fpns-fill"></div></div>
           <div class="fpns-ticks"></div>
           <div class="fpns-knob"></div>
-          <div class="fpns-tip"><img alt=""><div class="fpns-noimg">sin imagen</div><span></span></div>
+          <div class="fpns-tip"><img alt=""><div class="fpns-noimg">no preview</div><span></span></div>
         </div>
         <span class="fpns-edge fpns-edge-r"></span>
-        <button class="fpns-page" data-page="1" title="Ventana siguiente">&rsaquo;</button>
-        <span class="fpns-edge fpns-scale" title="Escala de la barra (click para cambiar)"></span>
+        <button class="fpns-page" data-page="1" title="Next window">&rsaquo;</button>
+        <span class="fpns-edge fpns-scale" title="Bar scale (click to change)"></span>
       </div>`;
 
-    // Que los clicks del panel no lleguen al reproductor (que pausaría)
+    // Keep panel clicks away from the player (it would pause)
     ['click', 'mousedown', 'mouseup', 'pointerdown', 'pointerup', 'dblclick', 'touchstart', 'touchend'].forEach((ev) =>
       p.addEventListener(ev, (e) => e.stopPropagation()));
 
@@ -240,14 +240,14 @@
     });
     p.querySelector('.fpns-elapsed').addEventListener('click', () => toggleElapsed());
 
-    // Mouse: la miniatura sigue al puntero y arrastrar va moviendo el video.
-    // Dedo (iPhone/iPad, tele): arrastrar solo muestra la miniatura; al soltar salta ahí.
+    // Mouse: the thumbnail follows the pointer and dragging scrubs the video.
+    // Finger (iPhone/iPad, TV): dragging only previews; releasing jumps there.
     const bar = p.querySelector('.fpns-bar');
     const timeAtX = (clientX) => {
       const r = bar.getBoundingClientRect();
       return (curPage() + Math.min(1, Math.max(0, (clientX - r.left) / r.width))) * windowSec;
     };
-    let drag = null;               // { type, page } mientras hay un botón/dedo apoyado
+    let drag = null;               // { type, page } while a button/finger is down
     bar.addEventListener('pointermove', (e) => {
       const t = timeAtX(e.clientX);
       showTip(t);
@@ -256,7 +256,7 @@
     bar.addEventListener('pointerleave', () => { if (!drag) hideTip(); });
     bar.addEventListener('pointerdown', (e) => {
       if (e.button !== 0) return;
-      drag = { type: e.pointerType, page: curPage() };   // mientras arrastrás no cambia la ventana
+      drag = { type: e.pointerType, page: curPage() };   // the window doesn't change while dragging
       try { bar.setPointerCapture(e.pointerId); } catch {}
       const t = timeAtX(e.clientX);
       showTip(t);
@@ -278,7 +278,7 @@
     return p;
   }
 
-  // Miniatura y minuto sobre la barra para el segundo t (cambia de ventana si hace falta).
+  // Thumbnail and timestamp above the bar for second t.
   function showTip(t) {
     if (!panel) return;
     const tip = panel.querySelector('.fpns-tip');
@@ -295,7 +295,7 @@
     if (panel) panel.querySelector('.fpns-tip').style.display = 'none';
   }
 
-  // ---------- Modo vista previa (para control remoto): mover la miniatura y confirmar ----------
+  // ---------- Preview mode (for a remote control): move the thumbnail, then confirm ----------
   let previewT = null;
   function previewMove(sec) {
     if (!video) return;
@@ -323,7 +323,7 @@
     return true;
   }
 
-  // Muestra los controles del reproductor como si se hubiera movido el mouse.
+  // Shows the player controls as if the mouse had moved.
   function wake() {
     const host = document.querySelector('.dice-player-background');
     if (!host) return;
@@ -347,7 +347,7 @@
     panel.querySelector('[data-page="-1"]').style.visibility = page > 0 ? '' : 'hidden';
     const el = panel.querySelector('.fpns-elapsed');
     el.textContent = showElapsed ? fmt(video.currentTime) : '\u2022\u2022\u2022';
-    // marcas cada 15 min (o cada 5 si la escala es chica)
+    // ticks every 15 min (every 5 on small scales)
     const ticks = panel.querySelector('.fpns-ticks');
     const step = windowSec > 1800 ? 900 : 300;
     const key = windowSec + ':' + step;
@@ -388,7 +388,7 @@
     }
   }
 
-  // Para la app de la tele (o cualquier otro control): window.fpnsApi
+  // For the TV app (or any other controller): window.fpnsApi
   window.fpnsApi = {
     isPlayer: () => !!(getVideo() && document.querySelector('.dice-player-control')),
     isPaused: () => { const v = getVideo(); return !v || v.paused; },
@@ -402,8 +402,8 @@
     wake,
   };
 
-  // ---------- 5) Teclado ----------
-  // ←/→ 10 s · Shift 30 s · Ctrl 1 min · Ctrl+Shift 5 min · T muestra/oculta el tiempo transcurrido
+  // ---------- 5) Keyboard ----------
+  // ←/→ 10 s · Shift 30 s · Ctrl 1 min · Ctrl+Shift 5 min · T shows/hides the elapsed time
   window.addEventListener('keydown', (e) => {
     if (!video || !document.querySelector('.dice-player-control')) return;
     const tag = (e.target && e.target.tagName) || '';
@@ -426,7 +426,7 @@
     }
   }, true);
 
-  // ---------- Arranque ----------
+  // ---------- Start ----------
   const start = () => {
     scrubText(document.body);
     attach();

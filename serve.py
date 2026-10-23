@@ -1,4 +1,4 @@
-# Servidor local solo para instalar el script en Tampermonkey (UTF-8 explícito).
+# Local server only for installing the script in Tampermonkey (explicit UTF-8).
 import http.server, functools
 H = functools.partial(http.server.SimpleHTTPRequestHandler, directory=r"C:\Users\eljou\Documents\Claude Code\Fight Pass sin spoilers")
 H.func.extensions_map = {**http.server.SimpleHTTPRequestHandler.extensions_map, ".js": "text/javascript; charset=utf-8"}
