@@ -13,7 +13,7 @@ so you can watch old fights and events without knowing whether they ended in a f
   next window.
 - **Thumbnails on hover**, read from the same `.bif` file Fight Pass uses.
   Note: hovering past the end shows "no preview", which tells you the video is over by then.
-- **Touch-friendly bar**: on iPhone/iPad (or with the TV remote) dragging previews the thumbnail and releasing jumps there.
+- **Touch-friendly bar**: on iPhone/iPad dragging previews the thumbnail and releasing jumps there.
 - **Keyboard**: ←/→ 10 s · Shift 30 s · Ctrl 1 min · Ctrl+Shift 5 min · `T` shows/hides the elapsed time.
 - Hides the "Mini player" button and doesn't pass the duration to the OS media controls (Media Session).
 
@@ -28,19 +28,7 @@ don't use it.
 
 `serve.py` serves this folder on `http://127.0.0.1:8765` with `charset=utf-8`, to install the script from a local copy.
 
-## Android TV app
-
-[`android-tv/`](android-tv) is a small Android TV app that opens Fight Pass in a WebView with this script injected:
-
-- Outside a video, the D-pad moves an on-screen pointer and OK clicks.
-- Inside a video: OK play/pause · ←/→ ∓10 s · ↑/↓ ±1 min · 1/3 ∓30 s · 4/6 (or ⏪/⏩, CH−/CH+) ∓5 min ·
-  2 elapsed time · **5 thumbnail mode** (←/→ 30 s, ↑/↓ 5 min, OK jumps, Back cancels) · 0 pointer.
-- On every launch it downloads the latest script from this repo and uses it the next time.
-
-Build with JDK 17 and the Android SDK (`android-tv/gradlew assembleDebug`); the script is copied into the app's assets
-at build time.
-
-## For other apps
+## API
 
 The script exposes `window.fpnsApi`: `isPlayer()`, `isPaused()`, `jump(sec)`, `togglePlay()`,
 `previewMove(sec)` / `previewCommit()` / `previewCancel()` / `inPreview()` (move a thumbnail along the bar and confirm),

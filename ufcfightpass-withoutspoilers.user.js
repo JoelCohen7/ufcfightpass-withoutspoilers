@@ -243,7 +243,7 @@
     p.querySelector('.fpns-elapsed').addEventListener('click', () => toggleElapsed());
 
     // Mouse: the thumbnail follows the pointer and dragging scrubs the video.
-    // Finger (iPhone/iPad, TV): dragging only previews; releasing jumps there.
+    // Finger (iPhone/iPad): dragging only previews; releasing jumps there.
     const bar = p.querySelector('.fpns-bar');
     const timeAtX = (clientX) => {
       const r = bar.getBoundingClientRect();
@@ -401,7 +401,7 @@
     }
   }
 
-  // For the TV app (or any other controller): window.fpnsApi
+  // For other controllers (e.g. a TV remote wrapper): window.fpnsApi
   window.fpnsApi = {
     isPlayer: () => !!(getVideo() && document.querySelector('.dice-player-control')),
     isPaused: () => { const v = getVideo(); return !v || v.paused; },
