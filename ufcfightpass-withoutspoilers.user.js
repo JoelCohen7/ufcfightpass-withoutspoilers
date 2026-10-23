@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         UFC Fight Pass Without Spoilers
 // @namespace    joel.fightpass.nospoilers
-// @version      1.2.0
+// @version      1.2.1
 // @description  Hides the duration and time remaining on UFC Fight Pass. Adds ±10 s / 30 s / 1 min / 5 min jumps and a fixed-scale seek bar with thumbnails.
 // @match        https://www.ufcfightpass.com/*
 // @match        https://ufcfightpass.com/*
@@ -40,6 +40,8 @@
     .card-progress,
     .fpns-hidden-time { display: none !important; }
     .btn-picture-in-picture { display: none !important; }
+    /* Keep the player controls visible while a remote is driving them (no mouse to wake them up) */
+    html.fpns-show .dice-player-control { opacity: 1 !important; pointer-events: auto !important; }
 
     #fpns-panel { position: absolute; left: 0; right: 0; bottom: 100%; padding: 0 16px 2px; box-sizing: border-box; z-index: 5;
       font: 13px/1.2 Roboto, Arial, sans-serif; color: #fff; user-select: none; }
@@ -297,8 +299,16 @@
 
   // ---------- Preview mode (for a remote control): move the thumbnail, then confirm ----------
   let previewT = null;
+  let peekTimer = null;
+  // Shows the player controls for ms milliseconds (0 = until preview mode ends).
+  function peek(ms) {
+    document.documentElement.classList.add('fpns-show');
+    clearTimeout(peekTimer);
+    if (ms) peekTimer = setTimeout(() => { if (previewT === null) document.documentElement.classList.remove('fpns-show'); }, ms);
+  }
   function previewMove(sec) {
     if (!video) return;
+    peek(0);
     if (previewT === null) previewT = video.currentTime;
     previewT = Math.max(0, previewT + sec);
     manualPage = Math.floor(previewT / windowSec);
@@ -312,6 +322,7 @@
     hideTip();
     seekTo(t);
     render();
+    peek(2500);
     return true;
   }
   function previewCancel() {
@@ -320,6 +331,7 @@
     hideTip();
     manualPage = null;
     render();
+    peek(2500);
     return true;
   }
 
@@ -327,6 +339,7 @@
   function wake() {
     const host = document.querySelector('.dice-player-background');
     if (!host) return;
+    if (previewT === null) peek(3000);
     const r = host.getBoundingClientRect();
     host.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 }));
   }

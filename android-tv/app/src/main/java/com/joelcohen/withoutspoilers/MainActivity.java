@@ -65,6 +65,7 @@ public class MainActivity extends Activity {
     private boolean helpShown;
     private long lastBack;
     private long lastCursorMove;
+    private boolean clickPending;      // OK was pressed in pointer mode; the click happens on release
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
@@ -287,6 +288,12 @@ public class MainActivity extends Activity {
     public boolean dispatchKeyEvent(KeyEvent e) {
         int k = e.getKeyCode();
         if (e.getAction() == KeyEvent.ACTION_UP) {
+            // Click on release: if the tap opens the on-screen keyboard, the release must not reach it (it closes it).
+            if (clickPending && (k == KeyEvent.KEYCODE_DPAD_CENTER || k == KeyEvent.KEYCODE_ENTER)) {
+                clickPending = false;
+                click(cursor.getCursorX(), cursor.getCursorY());
+                return true;
+            }
             return isHandledKey(k) || super.dispatchKeyEvent(e);
         }
         if (e.getAction() != KeyEvent.ACTION_DOWN) return super.dispatchKeyEvent(e);
@@ -433,7 +440,7 @@ public class MainActivity extends Activity {
                 break;
             case KeyEvent.KEYCODE_DPAD_CENTER:
             case KeyEvent.KEYCODE_ENTER:
-                if (repeat == 0) click(x, y);
+                if (repeat == 0) clickPending = true;
                 return true;
             case KeyEvent.KEYCODE_CHANNEL_UP: scroll(3); return true;
             case KeyEvent.KEYCODE_CHANNEL_DOWN: scroll(-3); return true;
@@ -492,11 +499,11 @@ public class MainActivity extends Activity {
         MotionEvent b = MotionEvent.obtain(down, down + 60, MotionEvent.ACTION_UP, x, y, 0);
         b.setSource(InputDevice.SOURCE_TOUCHSCREEN);
         View t = target();
+        if (t == web && !web.hasFocus()) web.requestFocus();
         t.dispatchTouchEvent(a);
         t.dispatchTouchEvent(b);
         a.recycle();
         b.recycle();
-        if (t == web) web.requestFocus();
     }
 
     @Override
