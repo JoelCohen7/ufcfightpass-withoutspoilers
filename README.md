@@ -14,6 +14,9 @@ so you can watch old fights and events without knowing whether they ended in a f
 - **Thumbnails on hover**, read from the same `.bif` file Fight Pass uses.
   Note: hovering past the end shows "no preview", which tells you the video is over by then.
 - **Touch-friendly bar**: on iPhone/iPad dragging previews the thumbnail and releasing jumps there.
+- **YouTube-style clicks**: a short click on the video (or Space / K) plays or pauses with a brief icon in the middle,
+  without bringing up the controls or the bar (moving the mouse does). Holding the click (or Space / K) plays at 2x
+  until you let go.
 - **Keyboard**: ←/→ 10 s · Shift 30 s · Ctrl 1 min · Ctrl+Shift 5 min · `T` shows/hides the elapsed time.
 - Hides the "Mini player" button and doesn't pass the duration to the OS media controls (Media Session).
 
