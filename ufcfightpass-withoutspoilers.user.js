@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         UFC Fight Pass Without Spoilers
 // @namespace    joel.fightpass.nospoilers
-// @version      1.3.0
-// @description  Hides the duration and time remaining on UFC Fight Pass. Adds ±10 s / 30 s / 1 min / 5 min jumps and a fixed-scale seek bar with thumbnails.
+// @version      1.4.0
+// @description  Hides the duration and time remaining on UFC Fight Pass. Adds ±10 s / 30 s / 1 min / 5 min jumps and a fixed-scale seek bar with thumbnails. Works on computers and on iPhone/iPad (Safari + Userscripts).
 // @match        https://www.ufcfightpass.com/*
 // @match        https://ufcfightpass.com/*
 // @homepageURL  https://github.com/JoelCohen7/ufcfightpass-withoutspoilers
@@ -87,13 +87,21 @@
     .fpns-speed { position: absolute; top: 72px; left: 50%; transform: translateX(-50%); display: none; align-items: center; gap: 6px;
       background: rgba(0,0,0,.6); color: #fff; font: 600 16px/1 Arial, sans-serif; padding: 8px 14px; border-radius: 18px; pointer-events: none; z-index: 60; }
     .fpns-speed.on { display: flex; }
+    /* Touch screens: the site's controls give way to our own overlay (its ⋯ button brings them back) */
+    html.fpns-touch:not(.fpns-siteui) .dice-player-control,
+    html.fpns-touch:not(.fpns-siteui) .dice-player-topbar,
+    html.fpns-touch:not(.fpns-siteui) .center-play-button,
+    html.fpns-touch:not(.fpns-siteui) .discovery,
+    html.fpns-touch:not(.fpns-siteui) .dice-player-sidebar,
+    html.fpns-touch:not(.fpns-siteui) .dice-player-hotkey-feedback { opacity: 0 !important; pointer-events: none !important; }
   `;
   const addStyle = () => {
     if (document.getElementById('fpns-style')) return;
     const s = document.createElement('style');
     s.id = 'fpns-style';
     s.textContent = css;
-    (document.head || document.documentElement).appendChild(s);
+    const parent = document.head || document.documentElement;
+    if (parent) parent.appendChild(s);    // too early (no <html> yet): attach() adds it later
   };
   addStyle();
 
@@ -113,10 +121,15 @@
   };
 
   // ---------- 2) Don't hand the duration to the OS media controls ----------
+  // The site's calls are dropped; section 8 tells the OS a fake length instead.
+  const origSetPositionState = (() => {
+    try {
+      const ms = navigator.mediaSession;
+      return ms && ms.setPositionState ? ms.setPositionState.bind(ms) : null;
+    } catch { return null; }
+  })();
   try {
-    if (navigator.mediaSession && navigator.mediaSession.setPositionState) {
-      navigator.mediaSession.setPositionState = function () {};
-    }
+    if (origSetPositionState) navigator.mediaSession.setPositionState = function () {};
   } catch {}
 
   // ---------- 3) Thumbnails (.bif file) ----------
@@ -135,6 +148,31 @@
       .observe({ type: 'resource', buffered: true });
   } catch {}
   try { performance.getEntriesByType('resource').forEach((e) => noteResource(e.name)); } catch {}
+
+  // On a touch screen the player may never ask for the .bif (it only uses it on hover): look for its address
+  // in the site's own API answers too.
+  const BIF_IN_TEXT = /https?:(?:\\?\/){2}[^"'\s<>]+?\.bif(?:\?[^"'\s<>]*)?/i;
+  const scanForBif = (text) => {
+    const m = typeof text === 'string' && BIF_IN_TEXT.exec(text);
+    if (m) noteResource(m[0].replace(/\\\//g, '/'));
+  };
+  try {
+    const origFetch = window.fetch;
+    window.fetch = function () {
+      const p = origFetch.apply(this, arguments);
+      p.then((r) => {
+        if (!bif && /json|text/i.test(r.headers.get('content-type') || '')) r.clone().text().then(scanForBif, () => {});
+      }, () => {});
+      return p;
+    };
+    const origSend = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.send = function () {
+      this.addEventListener('load', () => {
+        try { if (!bif && (this.responseType === '' || this.responseType === 'text')) scanForBif(this.responseText); } catch {}
+      });
+      return origSend.apply(this, arguments);
+    };
+  } catch {}
 
   async function loadBif(url) {
     try {
@@ -304,8 +342,12 @@
     if (u) { img.src = u; img.style.display = ''; noImg.style.display = 'none'; }
     else { img.style.display = 'none'; noImg.style.display = ''; }
     tip.querySelector('span').textContent = fmt(t);
-    tip.style.left = Math.min(1, Math.max(0, t / windowSec - curPage())) * 100 + '%';
     tip.style.display = 'block';
+    // Keep the thumbnail on screen near the ends of the bar
+    const bw = tip.parentNode.clientWidth;
+    const half = tip.offsetWidth / 2;
+    const x = Math.min(1, Math.max(0, t / windowSec - curPage())) * bw;
+    tip.style.left = Math.min(Math.max(x, half - 40), bw - half + 40) + 'px';
   }
   function hideTip() {
     if (panel) panel.querySelector('.fpns-tip').style.display = 'none';
@@ -403,12 +445,18 @@
       video = v;
       manualPage = null;
       if (video) {
-        try { video.disablePictureInPicture = true; } catch {}
         ['timeupdate', 'seeked', 'loadedmetadata', 'emptied'].forEach((ev) => video.addEventListener(ev, render));
       }
     }
+    document.querySelectorAll('video').forEach(watchVideo);
+    // With a mouse the panel sits on top of the site's controls; on a touch screen, in our own overlay.
+    const slot = touchSlot();
     const control = document.querySelector('.dice-player-control');
-    if (control && (!panel || !control.contains(panel))) {
+    if (slot && (!panel || panel.parentNode !== slot)) {
+      panel = panel || buildPanel();
+      slot.appendChild(panel);
+      render();
+    } else if (!slot && control && (!panel || !control.contains(panel))) {
       panel = panel || buildPanel();
       control.insertBefore(panel, control.firstChild);
       render();
@@ -603,6 +651,492 @@
   window.addEventListener('keypress', (e) => {
     if (isPauseKey(e) && !typing(e) && ytHost() && YT.ready()) { e.preventDefault(); e.stopImmediatePropagation(); }
   }, true);
+
+  const TL = {
+    host: () => document.querySelector(YT.host),
+    video: () => getVideo(),
+    scope: () => true,                 // the page is one where Safari's own player must never show
+    active: () => YT.ready(),
+    exclude: '.preferences-panel',     // taps here keep their normal behavior (simple controls)
+    excludeSite: YT.exclude,           // ... and with the site's controls brought back
+  };
+  // ---------- 8) iPhone / iPad (touch screens) ----------
+  // On a touch screen the player gets its own overlay instead of the site's controls (which are hidden):
+  //   tap = show/hide the controls · double tap on the left/right third = −10/+10 s (keep tapping to add more)
+  //   hold = 2x until you let go · ⛶ = full screen (on iPhone it fills the screen inside Safari, never Apple's player)
+  //   ⋯ = bring back the site's own controls (settings, audio, etc.), still without times.
+  // Safari's own full-screen player, Picture in Picture and AirPlay show the duration, so they are blocked.
+  // (decided once the page exists: at document-start Safari can't answer media queries yet)
+  let touchDevice = null;
+  const TOUCH = () => {
+    if (touchDevice === null && document.documentElement && document.body) {
+      touchDevice = navigator.maxTouchPoints > 0 && matchMedia('(pointer: coarse)').matches;
+    }
+    return !!touchDevice;
+  };
+  const IOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+  const TAP_ZONE = 0.35;        // left/right share of the player width for double-tap jumps
+  const DOUBLE_TAP_MS = 350;
+  const STREAK_MS = 800;        // after a double tap, more taps on the same side keep adding 10 s
+  const UI_HIDE_MS = 3500;
+
+  const ICON_BACK = '<svg viewBox="0 0 24 24" width="28" height="28"><path fill="#fff" d="M15.4 7.4 14 6l-6 6 6 6 1.4-1.4L10.8 12z"/></svg>';
+  const ICON_MORE = '<svg viewBox="0 0 24 24" width="28" height="28"><path fill="#fff" d="M6 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4m6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4m6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4"/></svg>';
+  const ICON_FS = '<svg viewBox="0 0 24 24" width="28" height="28"><path fill="#fff" d="M7 14H5v5h5v-2H7zm-2-4h2V7h3V5H5zm12 7h-3v2h5v-5h-2zM14 5v2h3v3h2V5z"/></svg>';
+  const ICON_FS_EXIT = '<svg viewBox="0 0 24 24" width="28" height="28"><path fill="#fff" d="M5 16h3v3h2v-5H5zm3-8H5v2h5V5H8zm6 11h2v-3h3v-2h-5zm2-11V5h-2v5h5V8z"/></svg>';
+  const ICON_BIG_PLAY = '<svg viewBox="0 0 24 24" width="60" height="60"><path fill="#fff" d="M8 5v14l11-7z"/></svg>';
+  const ICON_BIG_PAUSE = '<svg viewBox="0 0 24 24" width="60" height="60"><path fill="#fff" d="M6 5h4v14H6zm8 0h4v14h-4z"/></svg>';
+  const skipIcon = (dir) => '<svg viewBox="0 0 24 24" width="44" height="44"><path fill="#fff" d="' + (dir < 0
+    ? 'M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z'
+    : 'M12 5V1l5 5-5 5V7c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6h2c0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8z') +
+    '"/><text x="12" y="16.3" text-anchor="middle" font-size="6.5" font-weight="700" font-family="Arial, sans-serif" fill="#fff">10</text></svg>';
+
+  const touchCss = `
+    #fpns-touch { position: absolute; inset: 0; z-index: 40; display: none; pointer-events: none; color: #fff;
+      font: 14px/1.2 -apple-system, "Helvetica Neue", Arial, sans-serif; -webkit-tap-highlight-color: transparent;
+      -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+    html.fpns-touch #fpns-touch { display: block; }
+    html.fpns-touch .fpns-surface, html.fpns-touch .fpns-surface * { touch-action: pan-y; -webkit-user-select: none; user-select: none;
+      -webkit-touch-callout: none; }
+    html.fpns-touch .fpns-pfs, html.fpns-touch .fpns-pfs * { touch-action: none; }
+    html.fpns-touch #fpns-touch button, html.fpns-touch #fpns-touch .fpns-btn { touch-action: manipulation; }
+    html.fpns-touch #fpns-touch .fpns-bar { touch-action: none; }
+    #fpns-touch .fpns-t-layer { position: absolute; inset: 0; opacity: 0; transition: opacity .2s; pointer-events: none; }
+    html.fpns-tui #fpns-touch .fpns-t-layer { opacity: 1; }
+    html.fpns-tui #fpns-touch button, html.fpns-tui #fpns-touch .fpns-t-bot { pointer-events: auto; }
+    #fpns-touch .fpns-t-shade { position: absolute; inset: 0;
+      background: linear-gradient(rgba(0,0,0,.6), rgba(0,0,0,0) 25%, rgba(0,0,0,0) 55%, rgba(0,0,0,.75)); }
+    #fpns-touch .fpns-t-top { position: absolute; left: 0; right: 0; top: 0; display: flex; align-items: center;
+      padding: max(4px, env(safe-area-inset-top)) max(6px, env(safe-area-inset-right)) 0 max(6px, env(safe-area-inset-left)); }
+    #fpns-touch .fpns-t-flex { flex: 1; }
+    #fpns-touch .fpns-t-mid { position: absolute; left: 50%; top: 45%; transform: translate(-50%, -50%); display: flex;
+      align-items: center; gap: min(12vw, 90px); }
+    #fpns-touch .fpns-t-bot { position: absolute; left: 0; right: 0; bottom: 0;
+      padding: 0 max(10px, env(safe-area-inset-right)) max(4px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left)); }
+    #fpns-touch button { background: none !important; border: 0 !important; margin: 0; padding: 8px !important; color: #fff;
+      touch-action: manipulation; -webkit-appearance: none; appearance: none; cursor: pointer; line-height: 0; min-width: 0; }
+    #fpns-touch button svg { display: block; filter: drop-shadow(0 0 3px rgba(0,0,0,.6)); }
+    #fpns-touch button:active { opacity: .6; }
+    #fpns-touch .fpns-t-play { padding: 4px !important; border-radius: 50%; }
+    #fpns-touch #fpns-panel { position: static !important; width: auto !important; padding: 0 !important; margin: 0 !important; touch-action: none; }
+    #fpns-touch #fpns-panel .fpns-row { flex-wrap: nowrap; gap: 4px; }
+    #fpns-touch #fpns-panel .fpns-btn { flex: 1 1 0; min-width: 0 !important; padding: 8px 0 !important; font-size: 13px !important;
+      line-height: 1 !important; text-align: center; white-space: nowrap; touch-action: manipulation; }
+    #fpns-touch .fpns-elapsed { min-width: 58px; padding: 8px 0 8px 6px; }
+    #fpns-touch .fpns-barwrap { margin: 2px 0 0; gap: 6px; }
+    #fpns-touch .fpns-page { padding: 6px 8px !important; font-size: 22px !important; line-height: 1 !important; }
+    #fpns-touch .fpns-edge { min-width: 44px; font-size: 12px; }
+    #fpns-touch .fpns-scale { padding: 8px 0; }
+    #fpns-touch .fpns-bar { height: 36px; }
+    #fpns-touch .fpns-track, #fpns-touch .fpns-bar:hover .fpns-track { top: 16px; height: 4px; }
+    #fpns-touch .fpns-knob { width: 16px; height: 16px; margin: -8px 0 0 -8px; }
+    #fpns-touch .fpns-tick { top: 12px; bottom: 12px; }
+    #fpns-touch .fpns-tip { bottom: 40px; }
+    #fpns-touch .fpns-tip img, #fpns-touch .fpns-tip .fpns-img, #fpns-touch .fpns-tip .fpns-noimg { width: 200px; height: 112px; }
+    /* iPhone upright: the small player only gets the bar (the jumps come back in full screen) */
+    @media (max-width: 500px) {
+      html:not(.fpns-pfs-on) #fpns-touch #fpns-panel .fpns-btn { display: none !important; }
+      html:not(.fpns-pfs-on) #fpns-touch .fpns-elapsed { padding: 4px 0 0; }
+      html.fpns-pfs-on #fpns-touch #fpns-panel .fpns-row { flex-wrap: wrap; }
+      html.fpns-pfs-on #fpns-touch #fpns-panel .fpns-btn { flex: 1 1 22%; }
+      html.fpns-pfs-on #fpns-touch .fpns-elapsed { flex: 1 1 100%; text-align: center; padding: 4px 0 0; }
+      html.fpns-pfs-on #fpns-touch .fpns-t-bot { padding-bottom: max(24px, env(safe-area-inset-bottom)); }
+    }
+    /* Full screen inside the page (iPhone has no real full screen for anything but Safari's own player) */
+    .fpns-pfs { position: fixed !important; left: 0 !important; top: 0 !important; right: 0 !important; bottom: 0 !important;
+      width: 100vw !important; height: 100vh !important; height: 100dvh !important; max-width: none !important; max-height: none !important;
+      min-height: 0 !important; margin: 0 !important; padding: 0 !important; z-index: 2147483600 !important; background: #000 !important;
+      transform: none !important; border-radius: 0 !important; aspect-ratio: auto !important; }
+    .fpns-pfs video { object-fit: contain !important; }
+    .fpns-pfs-anc { transform: none !important; filter: none !important; contain: none !important; will-change: auto !important;
+      z-index: 2147483600 !important; }
+    html.fpns-pfs-on, html.fpns-pfs-on body { overflow: hidden !important; }
+  `;
+  const addTouchStyle = () => {
+    if (document.getElementById('fpns-tstyle')) return;
+    const s = document.createElement('style');
+    s.id = 'fpns-tstyle';
+    s.textContent = touchCss;
+    (document.head || document.documentElement).appendChild(s);
+  };
+
+  let touchEl = null;
+  let uiOn = true;
+  let uiTimer = null;
+  let pfsRoot = null;
+  let pfsAuto = false;          // full screen entered by turning the iPhone sideways
+  const touchOn = () => document.documentElement.classList.contains('fpns-touch');
+
+  // The element that holds both the video and the controls (what goes full screen).
+  function playerRoot() {
+    const h = TL.host();
+    const v = TL.video();
+    if (!h) return null;
+    let r = h;
+    while (v && r && !r.contains(v)) r = r.parentElement;
+    return r || h;
+  }
+  // Videos we look after: every video on the page (ads may play in their own <video>, outside the player).
+  const owns = (v) => !!v && TL.scope();
+
+  // Every video of the player: plays inside the page, no Picture in Picture, no AirPlay, no native controls.
+  function prepVideo(v) {
+    if (v.dataset.fpnsPrep) return;
+    v.dataset.fpnsPrep = '1';
+    try {
+      v.playsInline = true;
+      v.setAttribute('playsinline', '');
+      v.setAttribute('webkit-playsinline', '');
+      v.disablePictureInPicture = true;
+      v.disableRemotePlayback = true;
+      v.setAttribute('x-webkit-airplay', 'deny');
+      v.setAttribute('disablepictureinpicture', '');
+      v.setAttribute('disableremoteplayback', '');
+    } catch {}
+    if (TOUCH() || IOS) {
+      new MutationObserver(() => { if (v.controls && owns(v)) v.controls = false; }).observe(v, { attributes: true, attributeFilter: ['controls'] });
+      if (v.controls && owns(v)) v.controls = false;
+    }
+  }
+
+  // ---- full screen ----
+  const fsElement = () => document.fullscreenElement || document.webkitFullscreenElement || null;
+  const fsApi = () => !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
+  const isFs = () => !!pfsRoot || !!fsElement();
+
+  function enterPfs(r) {
+    if (!r || pfsRoot) return;
+    pfsRoot = r;
+    pfsAuto = false;
+    r.classList.add('fpns-pfs');
+    for (let a = r.parentElement; a && a !== document.documentElement; a = a.parentElement) a.classList.add('fpns-pfs-anc');
+    document.documentElement.classList.add('fpns-pfs-on');
+    try { window.scrollTo(0, 0); } catch {}
+    window.dispatchEvent(new Event('resize'));
+    touchIcons();
+  }
+  function exitPfs() {
+    if (!pfsRoot) return;
+    pfsRoot.classList.remove('fpns-pfs');
+    document.querySelectorAll('.fpns-pfs-anc').forEach((a) => a.classList.remove('fpns-pfs-anc'));
+    document.documentElement.classList.remove('fpns-pfs-on');
+    pfsRoot = null;
+    window.dispatchEvent(new Event('resize'));
+    touchIcons();
+  }
+  function enterFs() {
+    const r = playerRoot();
+    if (!r) return;
+    if (fsApi() && (r.requestFullscreen || r.webkitRequestFullscreen)) {
+      try {
+        const p = r.requestFullscreen ? r.requestFullscreen() : r.webkitRequestFullscreen();
+        if (p && p.catch) p.catch(() => enterPfs(r));
+        return;
+      } catch {}
+    }
+    enterPfs(r);
+  }
+  function exitFs() {
+    if (pfsRoot) exitPfs();
+    if (fsElement()) {
+      try { (document.exitFullscreen || document.webkitExitFullscreen).call(document); } catch {}
+    }
+  }
+  const toggleFs = () => (isFs() ? exitFs() : enterFs());
+
+  // iPhone turned sideways while watching: fill the screen, like the apps do; upright again: back to the page.
+  const phoneLandscape = matchMedia('(orientation: landscape) and (max-height: 500px)');
+  const onRotate = () => {
+    if (!touchOn()) return;
+    if (phoneLandscape.matches && !isFs()) {
+      enterPfs(playerRoot());
+      pfsAuto = true;
+    } else if (!phoneLandscape.matches && pfsRoot && pfsAuto) {
+      exitPfs();
+    }
+  };
+  try { phoneLandscape.addEventListener('change', onRotate); } catch { try { phoneLandscape.addListener(onRotate); } catch {} }
+
+  if (IOS) {
+    // The site asks Safari for its own full-screen player (or a full-screen <video>): give it ours instead.
+    const VP = HTMLVideoElement.prototype;
+    ['webkitEnterFullscreen', 'webkitEnterFullScreen', 'requestFullscreen', 'webkitRequestFullscreen', 'webkitRequestFullScreen'].forEach((name) => {
+      const orig = VP[name];
+      if (typeof orig !== 'function') return;
+      try {
+        VP[name] = function () {
+          if (owns(this)) {
+            enterFs();
+            return name === 'requestFullscreen' ? Promise.resolve() : undefined;
+          }
+          return orig.apply(this, arguments);
+        };
+      } catch {}
+    });
+    // In case it gets there anyway: leave it at once and fill the screen with our player.
+    document.addEventListener('webkitbeginfullscreen', (e) => {
+      const v = e.target;
+      if (!(v instanceof HTMLVideoElement) || !owns(v)) return;
+      try { v.webkitExitFullscreen(); } catch {}
+      setTimeout(() => enterPfs(playerRoot()), 50);
+    }, true);
+    document.addEventListener('webkitpresentationmodechanged', (e) => {
+      const v = e.target;
+      if (v instanceof HTMLVideoElement && v.webkitPresentationMode && v.webkitPresentationMode !== 'inline' && owns(v)) {
+        try { v.webkitSetPresentationMode('inline'); } catch {}
+      }
+    }, true);
+  }
+  ['fullscreenchange', 'webkitfullscreenchange'].forEach((type) => document.addEventListener(type, () => {
+    const el = fsElement();
+    if (el && el.tagName === 'VIDEO' && owns(el)) {
+      exitFs();
+      setTimeout(() => enterPfs(playerRoot()), 50);
+    }
+    touchIcons();
+  }));
+
+  // ---- overlay ----
+  function buildTouch() {
+    const t = document.createElement('div');
+    t.id = 'fpns-touch';
+    t.innerHTML = `
+      <div class="fpns-t-layer">
+        <div class="fpns-t-shade"></div>
+        <div class="fpns-t-top">
+          <button data-act="back" aria-label="Back">${ICON_BACK}</button>
+          <span class="fpns-t-flex"></span>
+          <button data-act="site" aria-label="Site controls">${ICON_MORE}</button>
+          <button data-act="fs" aria-label="Full screen">${ICON_FS}</button>
+        </div>
+        <div class="fpns-t-mid">
+          <button data-act="rw" aria-label="Back 10 seconds">${skipIcon(-1)}</button>
+          <button data-act="play" class="fpns-t-play" aria-label="Play / pause">${ICON_BIG_PLAY}</button>
+          <button data-act="fw" aria-label="Forward 10 seconds">${skipIcon(1)}</button>
+        </div>
+        <div class="fpns-t-bot"></div>
+      </div>`;
+    // Anything touched inside the overlay keeps it on screen, and never reaches the site's player.
+    ['pointerdown', 'pointermove'].forEach((ev) => t.addEventListener(ev, (e) => { if (uiOn && e.pointerType !== 'mouse') setUi(true); }, true));
+    ['click', 'mousedown', 'mouseup', 'pointerdown', 'pointerup', 'touchstart', 'touchend', 'dblclick'].forEach((ev) =>
+      t.addEventListener(ev, (e) => { if (e.target.closest('button, .fpns-t-bot')) e.stopPropagation(); }));
+    t.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', (e) => {
+      e.preventDefault();
+      const v = TL.video();
+      switch (b.dataset.act) {
+        case 'play': if (v) { if (v.paused) v.play(); else v.pause(); } break;
+        case 'rw': jump(-10); break;
+        case 'fw': jump(10); break;
+        case 'fs': toggleFs(); break;
+        case 'site': {
+          const on = document.documentElement.classList.toggle('fpns-siteui');
+          toast(on ? 'Site controls' : 'Simple controls');
+          if (on) wakeSite();
+          break;
+        }
+        case 'back': if (isFs()) exitFs(); else history.back(); break;
+      }
+      setUi(true);
+    }));
+    return t;
+  }
+
+  function wakeSite() {
+    const h = TL.host();
+    if (!h) return;
+    const r = h.getBoundingClientRect();
+    h.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 }));
+  }
+
+  function touchIcons() {
+    if (!touchEl) return;
+    const v = TL.video();
+    const play = touchEl.querySelector('[data-act="play"]');
+    const paused = !v || v.paused;
+    if (play.dataset.state !== String(paused)) {
+      play.dataset.state = String(paused);
+      play.innerHTML = paused ? ICON_BIG_PLAY : ICON_BIG_PAUSE;
+    }
+    const fs = touchEl.querySelector('[data-act="fs"]');
+    const full = isFs();
+    if (fs.dataset.state !== String(full)) {
+      fs.dataset.state = String(full);
+      fs.innerHTML = full ? ICON_FS_EXIT : ICON_FS;
+    }
+  }
+
+  // Shows (or hides) the overlay; while the video plays it hides itself after a few seconds.
+  function setUi(on) {
+    uiOn = on;
+    document.documentElement.classList.toggle('fpns-tui', on);
+    clearTimeout(uiTimer);
+    const v = TL.video();
+    if (on && v && !v.paused) uiTimer = setTimeout(() => { if (!tp) setUi(false); }, UI_HIDE_MS);
+    if (on && document.documentElement.classList.contains('fpns-siteui')) wakeSite();
+  }
+
+  let touchVideo = null;
+  function touchUpdate() {
+    const on = TOUCH() && TL.active();
+    if (pfsRoot && !pfsRoot.isConnected) exitPfs();
+    if (!on) {
+      if (touchOn()) document.documentElement.classList.remove('fpns-touch');
+      return;
+    }
+    addTouchStyle();
+    const h = playerRoot();
+    if (!touchEl) touchEl = buildTouch();
+    if (touchEl.parentNode !== h) {
+      if (getComputedStyle(h).position === 'static') h.style.position = 'relative';
+      h.appendChild(touchEl);
+      h.classList.add('fpns-surface');
+    }
+    if (!touchOn()) {
+      document.documentElement.classList.add('fpns-touch');
+      setUi(true);
+      onRotate();
+    }
+    const v = TL.video();
+    if (v && v !== touchVideo) {
+      touchVideo = v;
+      v.addEventListener('play', () => { touchIcons(); if (uiOn) setUi(true); });
+      v.addEventListener('pause', () => { touchIcons(); setUi(true); });
+    }
+    touchIcons();
+  }
+  // Where the panel goes on a touch screen (null = in the site's controls, as with a mouse).
+  function touchSlot() {
+    touchUpdate();
+    return touchOn() && touchEl ? touchEl.querySelector('.fpns-t-bot') : null;
+  }
+  if (navigator.maxTouchPoints > 0) setInterval(touchUpdate, 1000);
+
+  // ---- gestures on the video ----
+  let tp = null;            // finger down on the video: { id, x, y, moved, hold, timer }
+  let tHold = null;         // { prevRate, wasPaused } while holding for 2x
+  let lastTap = null;       // { t, zone }
+  let streak = null;        // { dir, sum, t } double-tap jumps in a row
+  let touchSwallow = 0;     // until then, the emulated mouse events / clicks of a touch don't reach the site
+
+  const onTouchSurface = (e) => {
+    if (!touchOn() || !(e.target instanceof Element)) return false;
+    const h = TL.host();
+    const r = playerRoot();
+    if (!h || !r || !r.contains(e.target)) return false;
+    if (e.target.closest('#fpns-touch button, #fpns-touch .fpns-t-bot')) return false;
+    return !e.target.closest(document.documentElement.classList.contains('fpns-siteui') ? TL.excludeSite : TL.exclude);
+  };
+  const swallowEvent = (e) => {
+    e.stopImmediatePropagation();
+    if (e.cancelable) e.preventDefault();
+  };
+
+  function touchHoldStart() {
+    const v = TL.video();
+    if (!v) return;
+    tHold = { prevRate: v.playbackRate, wasPaused: v.paused };
+    v.playbackRate = 2;
+    if (v.paused) v.play();
+    speedBadge(true);
+  }
+  function touchHoldEnd() {
+    if (!tHold) return;
+    const v = TL.video();
+    if (v) {
+      v.playbackRate = tHold.prevRate || 1;
+      if (tHold.wasPaused) v.pause();
+    }
+    tHold = null;
+    speedBadge(false);
+  }
+
+  function onTap(x) {
+    const h = TL.host();
+    const r = h.getBoundingClientRect();
+    const f = (x - r.left) / r.width;
+    const zone = f < TAP_ZONE ? -1 : f > 1 - TAP_ZONE ? 1 : 0;
+    const now = Date.now();
+    const add = () => {
+      streak.sum += 10;
+      streak.t = now;
+      if (video) seekTo(video.currentTime + zone * 10);
+      toast((zone < 0 ? '−' : '+') + streak.sum + ' s');
+    };
+    if (zone && streak && streak.dir === zone && now - streak.t < STREAK_MS) return add();
+    if (zone && lastTap && lastTap.zone === zone && now - lastTap.t < DOUBLE_TAP_MS) {
+      setUi(false);            // like YouTube: no controls while jumping, so more taps don't land on buttons
+      lastTap = null;
+      streak = { dir: zone, sum: 0, t: now };
+      return add();
+    }
+    streak = null;
+    lastTap = { t: now, zone };
+    setUi(!uiOn);
+  }
+
+  window.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'mouse' || !onTouchSurface(e)) return;
+    swallowEvent(e);
+    touchSwallow = Date.now() + 1000;
+    if (tp) return;
+    tp = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: false, hold: false };
+    tp.timer = setTimeout(() => {
+      if (tp && !tp.moved) { tp.hold = true; touchHoldStart(); }
+    }, HOLD_MS + 100);
+  }, true);
+  window.addEventListener('pointermove', (e) => {
+    if (!tp || e.pointerId !== tp.id) return;
+    swallowEvent(e);
+    if (Math.abs(e.clientX - tp.x) + Math.abs(e.clientY - tp.y) > 14) {
+      tp.moved = true;
+      clearTimeout(tp.timer);
+    }
+  }, true);
+  const fingerUp = (e, cancel) => {
+    if (!tp || e.pointerId !== tp.id) return;
+    swallowEvent(e);
+    touchSwallow = Date.now() + 700;
+    clearTimeout(tp.timer);
+    const t = tp;
+    tp = null;
+    if (t.hold) { touchHoldEnd(); setUi(uiOn); return; }
+    if (!cancel && !t.moved) onTap(e.clientX);
+  };
+  window.addEventListener('pointerup', (e) => fingerUp(e, false), true);
+  window.addEventListener('pointercancel', (e) => fingerUp(e, true), true);
+  // Outside full screen the page can still be scrolled with a finger on the video (touch-action: pan-y);
+  // ending the touch is cancelled, so Safari doesn't turn it into a click for the site.
+  ['touchstart', 'touchmove', 'touchend', 'touchcancel'].forEach((type) => window.addEventListener(type, (e) => {
+    const r = playerRoot();
+    if (!(onTouchSurface(e) || (type !== 'touchstart' && (tp || Date.now() < touchSwallow) && r && r.contains(e.target)))) return;
+    e.stopImmediatePropagation();
+    if (e.cancelable && (pfsRoot || type === 'touchend')) e.preventDefault();
+  }, { capture: true, passive: false }));
+  ['mousedown', 'mouseup', 'click', 'dblclick', 'contextmenu'].forEach((type) => window.addEventListener(type, (e) => {
+    if (Date.now() < touchSwallow && onTouchSurface(e)) swallowEvent(e);
+  }, true));
+
+  // ---- the OS "Now Playing" controls (lock screen, Control Center) ----
+  // They would show the real length, so they are told every video is 10 hours long.
+  const FAKE_DURATION = 10 * 3600;
+  let lastFake = 0;
+  function fakePosition(force) {
+    if (!origSetPositionState || !video || !TL.active()) return;
+    const now = Date.now();
+    if (!force && now - lastFake < 5000) return;
+    lastFake = now;
+    try {
+      origSetPositionState({ duration: FAKE_DURATION, position: Math.min(FAKE_DURATION, Math.max(0, video.currentTime || 0)),
+        playbackRate: video.playbackRate || 1 });
+    } catch {}
+  }
+  const watchVideo = (v) => {
+    prepVideo(v);
+    if (v.dataset.fpnsFake) return;
+    v.dataset.fpnsFake = '1';
+    v.addEventListener('timeupdate', () => { if (v === video) fakePosition(false); });
+    ['play', 'pause', 'seeked', 'ratechange', 'loadedmetadata'].forEach((ev) => v.addEventListener(ev, () => { if (v === video) fakePosition(true); }));
+  };
 
   // ---------- Start ----------
   const start = () => {

@@ -13,7 +13,8 @@ so you can watch old fights and events without knowing whether they ended in a f
   next window.
 - **Thumbnails on hover**, read from the same `.bif` file Fight Pass uses.
   Note: hovering past the end shows "no preview", which tells you the video is over by then.
-- **Touch-friendly bar**: on iPhone/iPad dragging previews the thumbnail and releasing jumps there.
+- **iPhone and iPad**: its own touch controls (tap, double tap to jump, hold for 2x, a full screen that never
+  uses Apple's player). See below.
 - **YouTube-style clicks**: a short click on the video (or Space / K) plays or pauses with a brief icon in the middle,
   without bringing up the controls or the bar (moving the mouse does). Holding the click (or Space / K) plays at 2x
   until you let go.
@@ -31,6 +32,36 @@ don't use it.
 
 `serve.py` serves this folder on `http://127.0.0.1:8765` with `charset=utf-8`, to install the script from a local copy.
 
+## iPhone and iPad
+
+Use **Safari** with the free **[Userscripts](https://apps.apple.com/app/userscripts/id1463298887)** app (open source,
+by quoid). iOS 15.1 or later.
+
+1. Install Userscripts from the App Store and open it once (it picks a folder for the scripts on its own).
+2. Settings → Apps → Safari → Extensions → **Userscripts**: turn it on and set **All Websites → Allow**.
+3. In Safari open **[ufcfightpass-withoutspoilers.user.js](https://raw.githubusercontent.com/JoelCohen7/ufcfightpass-withoutspoilers/main/ufcfightpass-withoutspoilers.user.js)**, tap the **puzzle piece / AA** button in the address bar → **Userscripts** →
+   **Tap to install** → **Install**.
+4. Open [ufcfightpass.com](https://www.ufcfightpass.com), sign in and play a video.
+
+Userscripts checks the same link for updates (open its popup → **Check for updates**).
+
+On a touch screen the player gets its own controls instead of the site's:
+
+- **Tap** shows/hides them. While the video plays they hide by themselves after a few seconds.
+- **Double tap** the left or right third: −10 s / +10 s. Keep tapping to add 10 s more each time (−20 s, −30 s…).
+- **Hold** a finger on the video: 2x until you let go.
+- **The bar**: drag your finger to see the thumbnail and the time; let go to jump there.
+- **⛶** fills the screen. On iPhone, turning it sideways does that too (and upright again goes back). It is a full
+  screen inside Safari, never Apple's own video player, which would show the duration.
+- **⋯** brings back the site's own controls (settings, audio, etc.), still without any times. Tap it again to go back.
+- **‹** goes back.
+- On iPhone held upright only the bar and the time are shown; the jump buttons show up in full screen.
+
+Safari's own full-screen player, Picture in Picture and AirPlay are blocked, because they show the duration. The lock
+screen / Control Center "Now Playing" widget is told every video is 10 hours long, so its bar means nothing.
+
+On an iPad with a keyboard the keyboard shortcuts work too; with a trackpad it behaves like a computer.
+
 ## API
 
 The script exposes `window.fpnsApi`: `isPlayer()`, `isPaused()`, `jump(sec)`, `togglePlay()`,
@@ -46,3 +77,6 @@ The script exposes `window.fpnsApi`: `isPlayer()`, `isPaused()`, `jump(sec)`, `t
 
 LibreWolf 158 on Windows 11 and LibreWolf 156 on Steam Deck, with event replays of UFC 22 (1999), UFC 199 (2016)
 and UFC 239 (2019).
+
+The iPhone/iPad controls were tested in WebKit (Safari's engine) emulating an iPhone 14 and an iPad Pro 11, on pages
+that copy the player's structure; not yet on a real device.
