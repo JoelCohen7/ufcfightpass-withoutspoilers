@@ -6,8 +6,8 @@
 // @match        https://www.ufcfightpass.com/*
 // @match        https://ufcfightpass.com/*
 // @homepageURL  https://github.com/JoelCohen7/ufcfightpass-withoutspoilers
-// @updateURL    https://raw.githubusercontent.com/JoelCohen7/ufcfightpass-withoutspoilers/main/ufcfightpass-withoutspoilers.user.js
-// @downloadURL  https://raw.githubusercontent.com/JoelCohen7/ufcfightpass-withoutspoilers/main/ufcfightpass-withoutspoilers.user.js
+// @updateURL    https://raw.githubusercontent.com/JoelCohen7/ufcfightpass-withoutspoilers/ios/ufcfightpass-withoutspoilers.user.js
+// @downloadURL  https://raw.githubusercontent.com/JoelCohen7/ufcfightpass-withoutspoilers/ios/ufcfightpass-withoutspoilers.user.js
 // @run-at       document-start
 // @grant        none
 // @noframes

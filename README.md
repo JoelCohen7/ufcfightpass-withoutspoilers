@@ -24,7 +24,7 @@ so you can watch old fights and events without knowing whether they ended in a f
 ## Install
 
 1. Install [Tampermonkey](https://www.tampermonkey.net/) (or Violentmonkey) in Firefox, LibreWolf, Chrome or Edge.
-2. Open **[ufcfightpass-withoutspoilers.user.js](https://raw.githubusercontent.com/JoelCohen7/ufcfightpass-withoutspoilers/main/ufcfightpass-withoutspoilers.user.js)**
+2. Open **[ufcfightpass-withoutspoilers.user.js](https://raw.githubusercontent.com/JoelCohen7/ufcfightpass-withoutspoilers/ios/ufcfightpass-withoutspoilers.user.js)**
    and click **Install**. Tampermonkey checks that same link for updates.
 
 LibreWolf needs DRM enabled (Settings → General → "Play DRM-controlled content"), even though the archive videos tested
@@ -39,7 +39,7 @@ by quoid). iOS 15.1 or later.
 
 1. Install Userscripts from the App Store and open it once (it picks a folder for the scripts on its own).
 2. Settings → Apps → Safari → Extensions → **Userscripts**: turn it on and set **All Websites → Allow**.
-3. In Safari open **[ufcfightpass-withoutspoilers.user.js](https://raw.githubusercontent.com/JoelCohen7/ufcfightpass-withoutspoilers/main/ufcfightpass-withoutspoilers.user.js)**, tap the **puzzle piece / AA** button in the address bar → **Userscripts** →
+3. In Safari open **[ufcfightpass-withoutspoilers.user.js](https://raw.githubusercontent.com/JoelCohen7/ufcfightpass-withoutspoilers/ios/ufcfightpass-withoutspoilers.user.js)**, tap the **puzzle piece / AA** button in the address bar → **Userscripts** →
    **Tap to install** → **Install**.
 4. Open [ufcfightpass.com](https://www.ufcfightpass.com), sign in and play a video.
 
