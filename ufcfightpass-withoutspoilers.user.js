@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         UFC Fight Pass Without Spoilers
 // @namespace    joel.fightpass.nospoilers
-// @version      1.4.1
+// @version      1.4.2
 // @description  Hides the duration and time remaining on UFC Fight Pass. Adds ±10 s / 30 s / 1 min / 5 min jumps and a fixed-scale seek bar with thumbnails. Works on computers and on iPhone/iPad (Safari + Userscripts).
 // @match        https://www.ufcfightpass.com/*
 // @match        https://ufcfightpass.com/*
@@ -698,7 +698,7 @@
     html.fpns-touch #fpns-touch { display: block; }
     html.fpns-touch .fpns-surface, html.fpns-touch .fpns-surface * { touch-action: pan-y; -webkit-user-select: none; user-select: none;
       -webkit-touch-callout: none; }
-    html.fpns-touch .fpns-pfs, html.fpns-touch .fpns-pfs * { touch-action: none; }
+    html.fpns-touch [data-fpns-pfs], html.fpns-touch [data-fpns-pfs] * { touch-action: none; }
     html.fpns-touch #fpns-touch button, html.fpns-touch #fpns-touch .fpns-btn { touch-action: manipulation; }
     html.fpns-touch #fpns-touch .fpns-bar { touch-action: none; }
     #fpns-touch .fpns-t-layer { position: absolute; inset: 0; opacity: 0; transition: opacity .2s; pointer-events: none; }
@@ -742,14 +742,16 @@
       html.fpns-pfs-on #fpns-touch .fpns-elapsed { flex: 1 1 100%; text-align: center; padding: 4px 0 0; }
       html.fpns-pfs-on #fpns-touch .fpns-t-bot { padding-bottom: max(24px, env(safe-area-inset-bottom)); }
     }
-    /* Full screen inside the page (iPhone has no real full screen for anything but Safari's own player) */
-    .fpns-pfs { position: fixed !important; left: 0 !important; top: 0 !important; right: 0 !important; bottom: 0 !important;
+    /* Full screen inside the page (iPhone has no real full screen for anything but Safari's own player).
+       Data attributes, not classes: React rewrites the class of its elements on every render. */
+    [data-fpns-pfs] { position: fixed !important; left: 0 !important; top: 0 !important; right: 0 !important; bottom: 0 !important;
       width: 100vw !important; height: 100vh !important; height: 100dvh !important; max-width: none !important; max-height: none !important;
       min-height: 0 !important; margin: 0 !important; padding: 0 !important; z-index: 2147483600 !important; background: #000 !important;
       transform: none !important; border-radius: 0 !important; aspect-ratio: auto !important; }
-    .fpns-pfs video { object-fit: contain !important; }
-    .fpns-pfs-anc { transform: none !important; filter: none !important; contain: none !important; will-change: auto !important;
-      z-index: 2147483600 !important; }
+    [data-fpns-pfs] video { object-fit: contain !important; }
+    [data-fpns-pfs-anc] { transform: none !important; filter: none !important; contain: none !important; will-change: auto !important;
+      perspective: none !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
+      container-type: normal !important; z-index: 2147483600 !important; }
     html.fpns-pfs-on, html.fpns-pfs-on body { overflow: hidden !important; }
   `;
   const addTouchStyle = () => {
@@ -769,7 +771,7 @@
   }, true);
   let uiOn = true;
   let uiTimer = null;
-  let pfsRoot = null;
+  let pfsOn = false;            // full screen inside the page wanted
   let pfsAuto = false;          // full screen entered by turning the iPhone sideways
   const touchOn = () => document.documentElement.classList.contains('fpns-touch');
 
@@ -808,25 +810,33 @@
   // ---- full screen ----
   const fsElement = () => document.fullscreenElement || document.webkitFullscreenElement || null;
   const fsApi = () => !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
-  const isFs = () => !!pfsRoot || !!fsElement();
+  const isFs = () => pfsOn || !!fsElement();
 
+  // Puts the full-screen marks on the current player (or takes them off). Called again on every change of the page,
+  // in case the site replaced the player's elements.
+  function applyPfs() {
+    const r = pfsOn ? playerRoot() : null;
+    const anc = new Set();
+    for (let a = r && r.parentElement; a && a !== document.documentElement; a = a.parentElement) anc.add(a);
+    document.querySelectorAll('[data-fpns-pfs]').forEach((el) => { if (el !== r) el.removeAttribute('data-fpns-pfs'); });
+    document.querySelectorAll('[data-fpns-pfs-anc]').forEach((el) => { if (!anc.has(el)) el.removeAttribute('data-fpns-pfs-anc'); });
+    if (r && !r.hasAttribute('data-fpns-pfs')) r.setAttribute('data-fpns-pfs', '');
+    anc.forEach((a) => { if (!a.hasAttribute('data-fpns-pfs-anc')) a.setAttribute('data-fpns-pfs-anc', ''); });
+    document.documentElement.classList.toggle('fpns-pfs-on', !!r);
+  }
   function enterPfs(r) {
-    if (!r || pfsRoot) return;
-    pfsRoot = r;
+    if (!r || pfsOn) return;
+    pfsOn = true;
     pfsAuto = false;
-    r.classList.add('fpns-pfs');
-    for (let a = r.parentElement; a && a !== document.documentElement; a = a.parentElement) a.classList.add('fpns-pfs-anc');
-    document.documentElement.classList.add('fpns-pfs-on');
+    applyPfs();
     try { window.scrollTo(0, 0); } catch {}
     window.dispatchEvent(new Event('resize'));
     touchIcons();
   }
   function exitPfs() {
-    if (!pfsRoot) return;
-    pfsRoot.classList.remove('fpns-pfs');
-    document.querySelectorAll('.fpns-pfs-anc').forEach((a) => a.classList.remove('fpns-pfs-anc'));
-    document.documentElement.classList.remove('fpns-pfs-on');
-    pfsRoot = null;
+    if (!pfsOn) return;
+    pfsOn = false;
+    applyPfs();
     window.dispatchEvent(new Event('resize'));
     touchIcons();
   }
@@ -843,7 +853,7 @@
     enterPfs(r);
   }
   function exitFs() {
-    if (pfsRoot) exitPfs();
+    if (pfsOn) exitPfs();
     if (fsElement()) {
       try { (document.exitFullscreen || document.webkitExitFullscreen).call(document); } catch {}
     }
@@ -857,7 +867,7 @@
     if (phoneLandscape.matches && !isFs()) {
       enterPfs(playerRoot());
       pfsAuto = true;
-    } else if (!phoneLandscape.matches && pfsRoot && pfsAuto) {
+    } else if (!phoneLandscape.matches && pfsOn && pfsAuto) {
       exitPfs();
     }
   };
@@ -1000,7 +1010,10 @@
   let touchVideo = null;
   function touchUpdate() {
     const on = TOUCH() && TL.active();
-    if (pfsRoot && !pfsRoot.isConnected) exitPfs();
+    if (pfsOn) {
+      if (!TL.host()) exitPfs();      // left the player
+      else applyPfs();
+    }
     if (!on) {
       if (touchOn()) document.documentElement.classList.remove('fpns-touch');
       return;
@@ -1135,7 +1148,7 @@
     if (inOurUi(e.target)) return;
     if (!(onTouchSurface(e) || (type !== 'touchstart' && (tp || Date.now() < touchSwallow) && r && r.contains(e.target)))) return;
     e.stopImmediatePropagation();
-    if (e.cancelable && (pfsRoot || type === 'touchend')) e.preventDefault();
+    if (e.cancelable && (pfsOn || type === 'touchend')) e.preventDefault();
   }, { capture: true, passive: false }));
   ['mousedown', 'mouseup', 'click', 'dblclick', 'contextmenu'].forEach((type) => window.addEventListener(type, (e) => {
     if (Date.now() < touchSwallow && onTouchSurface(e)) swallowEvent(e);
