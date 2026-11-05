@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         UFC Fight Pass Without Spoilers
 // @namespace    joel.fightpass.nospoilers
-// @version      1.4.0
+// @version      1.4.1
 // @description  Hides the duration and time remaining on UFC Fight Pass. Adds ±10 s / 30 s / 1 min / 5 min jumps and a fixed-scale seek bar with thumbnails. Works on computers and on iPhone/iPad (Safari + Userscripts).
 // @match        https://www.ufcfightpass.com/*
 // @match        https://ufcfightpass.com/*
@@ -692,7 +692,7 @@
     '"/><text x="12" y="16.3" text-anchor="middle" font-size="6.5" font-weight="700" font-family="Arial, sans-serif" fill="#fff">10</text></svg>';
 
   const touchCss = `
-    #fpns-touch { position: absolute; inset: 0; z-index: 40; display: none; pointer-events: none; color: #fff;
+    #fpns-touch { position: absolute; inset: 0; z-index: 2147483647; display: none; pointer-events: none; color: #fff;
       font: 14px/1.2 -apple-system, "Helvetica Neue", Arial, sans-serif; -webkit-tap-highlight-color: transparent;
       -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
     html.fpns-touch #fpns-touch { display: block; }
@@ -761,6 +761,12 @@
   };
 
   let touchEl = null;
+  // After one of our buttons acted, Safari's own click for that touch is dropped wherever it lands
+  // (the layout may have changed under the finger, e.g. leaving full screen).
+  let nativeClickOff = 0;
+  window.addEventListener('click', (e) => {
+    if (e.isTrusted && Date.now() < nativeClickOff) { e.stopImmediatePropagation(); e.preventDefault(); }
+  }, true);
   let uiOn = true;
   let uiTimer = null;
   let pfsRoot = null;
@@ -920,6 +926,22 @@
     ['pointerdown', 'pointermove'].forEach((ev) => t.addEventListener(ev, (e) => { if (uiOn && e.pointerType !== 'mouse') setUi(true); }, true));
     ['click', 'mousedown', 'mouseup', 'pointerdown', 'pointerup', 'touchstart', 'touchend', 'dblclick'].forEach((ev) =>
       t.addEventListener(ev, (e) => { if (e.target.closest('button, .fpns-t-bot')) e.stopPropagation(); }));
+    // A finger on a button acts when it lifts, through a click of our own: the site may cancel the click Safari
+    // would make from the touch. Safari's own click (if it still comes) is then ignored.
+    const TAPPABLE = 'button, .fpns-scale, .fpns-elapsed';
+    let pressed = null;
+    t.addEventListener('pointerdown', (e) => {
+      pressed = e.pointerType !== 'mouse' ? e.target.closest(TAPPABLE) : null;
+    }, true);
+    t.addEventListener('pointerup', (e) => {
+      const el = pressed;
+      pressed = null;
+      if (!el || e.pointerType === 'mouse' || e.target.closest(TAPPABLE) !== el) return;
+      nativeClickOff = Date.now() + 800;
+      el.click();
+    }, true);
+    t.addEventListener('pointercancel', () => { pressed = null; }, true);
+
     t.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', (e) => {
       e.preventDefault();
       const v = TL.video();
@@ -986,7 +1008,8 @@
     addTouchStyle();
     const h = playerRoot();
     if (!touchEl) touchEl = buildTouch();
-    if (touchEl.parentNode !== h) {
+    // Always the last child: the site's own layers may sit at the same (maximum) z-index, and the last one wins.
+    if (touchEl.parentNode !== h || h.lastElementChild !== touchEl) {
       if (getComputedStyle(h).position === 'static') h.style.position = 'relative';
       h.appendChild(touchEl);
       h.classList.add('fpns-surface');
@@ -1026,6 +1049,7 @@
     if (e.target.closest('#fpns-touch button, #fpns-touch .fpns-t-bot')) return false;
     return !e.target.closest(document.documentElement.classList.contains('fpns-siteui') ? TL.excludeSite : TL.exclude);
   };
+  const inOurUi = (el) => el instanceof Element && !!el.closest('#fpns-touch button, #fpns-touch .fpns-t-bot');
   const swallowEvent = (e) => {
     e.stopImmediatePropagation();
     if (e.cancelable) e.preventDefault();
@@ -1108,6 +1132,7 @@
   // ending the touch is cancelled, so Safari doesn't turn it into a click for the site.
   ['touchstart', 'touchmove', 'touchend', 'touchcancel'].forEach((type) => window.addEventListener(type, (e) => {
     const r = playerRoot();
+    if (inOurUi(e.target)) return;
     if (!(onTouchSurface(e) || (type !== 'touchstart' && (tp || Date.now() < touchSwallow) && r && r.contains(e.target)))) return;
     e.stopImmediatePropagation();
     if (e.cancelable && (pfsRoot || type === 'touchend')) e.preventDefault();
