@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         UFC Fight Pass Without Spoilers
 // @namespace    joel.fightpass.nospoilers
-// @version      1.4.8
+// @version      1.4.9
 // @description  Hides the duration and time remaining on UFC Fight Pass. Adds ±10 s / 30 s / 1 min / 5 min jumps and a fixed-scale seek bar with thumbnails. Works on computers and on iPhone/iPad (Safari + Userscripts).
 // @match        https://www.ufcfightpass.com/*
 // @match        https://ufcfightpass.com/*
@@ -17,6 +17,7 @@
   'use strict';
   if (window.__fpns) return;
   window.__fpns = true;
+  const REAL_TOUCH_POINTS = navigator.maxTouchPoints || 0;
 
   // ---------- Settings ----------
   const WINDOWS_MIN = [15, 30, 60, 90];          // possible bar scales (minutes); click the scale label to cycle
@@ -673,11 +674,11 @@
   let touchDevice = null;
   const TOUCH = () => {
     if (touchDevice === null && document.documentElement && document.body) {
-      touchDevice = navigator.maxTouchPoints > 0 && matchMedia('(pointer: coarse)').matches;
+      touchDevice = REAL_TOUCH_POINTS > 0 && matchMedia('(pointer: coarse)').matches;
     }
     return !!touchDevice;
   };
-  const IOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+  const IOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && REAL_TOUCH_POINTS > 1);
   const TAP_ZONE = 0.35;        // left/right share of the player width for double-tap jumps
   const DOUBLE_TAP_MS = 350;
   const STREAK_MS = 800;        // after a double tap, more taps on the same side keep adding 10 s
@@ -941,7 +942,7 @@
       const v = TL.video();
       const ver = (/OS (\d+[_\d]*)/.exec(navigator.userAgent) || [])[1] || '?';
       d.textContent = [
-        'v1.4.8  iOS ' + ver.replace(/_/g, '.') + '  fs=' + pfsOn + ' real=' + !!fsElement(),
+        'v1.4.9  iOS ' + ver.replace(/_/g, '.') + '  fs=' + pfsOn + ' real=' + !!fsElement(),
         'screen ' + screen.width + 'x' + screen.height + '  dpr ' + devicePixelRatio,
         'inner ' + innerWidth + 'x' + innerHeight + '  scrollY ' + Math.round(scrollY) + '  docH ' + document.documentElement.scrollHeight,
         'vv ' + (vv ? Math.round(vv.width) + 'x' + Math.round(vv.height) + ' top ' + Math.round(vv.offsetTop) + ' pageTop ' + Math.round(vv.pageTop) : '-'),
@@ -1077,7 +1078,7 @@
         <div class="fpns-t-top">
           <button data-act="back" aria-label="Back">${ICON_BACK}</button>
           <span class="fpns-t-flex"></span>
-          <button data-act="info" class="fpns-t-ver" aria-label="Version and diagnostics">v1.4.8</button>
+          <button data-act="info" class="fpns-t-ver" aria-label="Version and diagnostics">v1.4.9</button>
           <button data-act="site" aria-label="Site controls">${ICON_MORE}</button>
           <button data-act="fs" aria-label="Full screen">${ICON_FS}</button>
         </div>
@@ -1204,7 +1205,7 @@
     touchUpdate();
     return touchOn() && touchEl ? touchEl.querySelector('.fpns-t-bot') : null;
   }
-  if (navigator.maxTouchPoints > 0) setInterval(touchUpdate, 1000);
+  if (REAL_TOUCH_POINTS > 0) setInterval(touchUpdate, 1000);
 
   // ---- gestures on the video ----
   let tp = null;            // finger down on the video: { id, x, y, moved, hold, timer }
