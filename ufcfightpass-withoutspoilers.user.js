@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         UFC Fight Pass Without Spoilers
 // @namespace    joel.fightpass.nospoilers
-// @version      1.4.6
+// @version      1.4.7
 // @description  Hides the duration and time remaining on UFC Fight Pass. Adds ±10 s / 30 s / 1 min / 5 min jumps and a fixed-scale seek bar with thumbnails. Works on computers and on iPhone/iPad (Safari + Userscripts).
 // @match        https://www.ufcfightpass.com/*
 // @match        https://ufcfightpass.com/*
@@ -767,10 +767,15 @@
     #fpns-touch .fpns-t-ver { font: 11px/1 -apple-system, Arial, sans-serif !important; opacity: .45; padding: 10px 6px !important; color: #fff; }
     [data-fpns-pfs-anc] { transform: none !important; filter: none !important; contain: none !important; will-change: auto !important;
       perspective: none !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
-      container-type: normal !important; z-index: 2147483600 !important; }
+      container-type: normal !important; z-index: 2147483600 !important;
+      overflow: visible !important; clip-path: none !important; -webkit-mask: none !important; mask: none !important; }
+    /* fixed boxes of the site around the player keep the size of the screen with Safari's bars: they take the visible area */
+    [data-fpns-pfs-box] { position: fixed !important; left: var(--fpns-vl, 0px) !important; top: var(--fpns-vt, 0px) !important;
+      right: auto !important; bottom: auto !important; width: var(--fpns-vw, 100vw) !important; height: var(--fpns-vh, 100dvh) !important;
+      max-height: none !important; min-height: 0 !important; }
     /* iPhone: Safari only hides its bars when the page scrolls, so in full screen the page gets room to scroll
        (the player stays fixed on top) and a swipe up on the video scrolls it */
-    html.fpns-pfs-on, html.fpns-pfs-on body { overflow-y: auto !important; }
+    html.fpns-pfs-on, html.fpns-pfs-on body { overflow: visible !important; }
     #fpns-scrollroom { height: 100vh; pointer-events: none; }
   `;
   const addTouchStyle = () => {
@@ -849,6 +854,12 @@
     fill.forEach((e) => { if (!e.hasAttribute('data-fpns-pfs-fill')) e.setAttribute('data-fpns-pfs-fill', ''); });
     document.querySelectorAll('[data-fpns-pfs-anc]').forEach((el) => { if (!anc.has(el)) el.removeAttribute('data-fpns-pfs-anc'); });
     anc.forEach((a) => { if (!a.hasAttribute('data-fpns-pfs-anc')) a.setAttribute('data-fpns-pfs-anc', ''); });
+    const boxes = new Set();
+    for (let a = r && r.parentElement; a && a !== document.body && a !== document.documentElement; a = a.parentElement) {
+      if (a.hasAttribute('data-fpns-pfs-box') || getComputedStyle(a).position === 'fixed') boxes.add(a);
+    }
+    document.querySelectorAll('[data-fpns-pfs-box]').forEach((el) => { if (!boxes.has(el)) el.removeAttribute('data-fpns-pfs-box'); });
+    boxes.forEach((a) => { if (!a.hasAttribute('data-fpns-pfs-box')) a.setAttribute('data-fpns-pfs-box', ''); });
     document.documentElement.classList.toggle('fpns-pfs-on', !!r);
     fitToScreen();
     let room = document.getElementById('fpns-scrollroom');
@@ -904,12 +915,27 @@
       const r = el.getBoundingClientRect();
       return Math.round(r.left) + ',' + Math.round(r.top) + ' ' + Math.round(r.width) + 'x' + Math.round(r.height);
     };
+    // boxes around the video shorter than the visible area that could cut it (name, size, position, overflow)
+    const clippers = (v) => {
+      const out = [];
+      const vh = window.visualViewport ? window.visualViewport.height : innerHeight;
+      for (let e = v && v.parentElement; e; e = e.parentElement) {
+        const cs = getComputedStyle(e);
+        const h = Math.round(e.getBoundingClientRect().height);
+        if (h < vh - 4 && (cs.overflow !== 'visible' || cs.position === 'fixed' || cs.clipPath !== 'none')) {
+          const name = e.tagName.toLowerCase() + (e.id ? '#' + e.id : '') + (typeof e.className === 'string' && e.className ? '.' + e.className.trim().split(/\s+/)[0] : '');
+          out.push('cut? ' + name + ' h' + h + ' ' + cs.position + ' ov:' + cs.overflow + (cs.clipPath !== 'none' ? ' clip' : ''));
+        }
+        if (out.length >= 4) break;
+      }
+      return out.length ? out : ['cut? none'];
+    };
     const fill = () => {
       const vv = window.visualViewport;
       const v = TL.video();
       const ver = (/OS (\d+[_\d]*)/.exec(navigator.userAgent) || [])[1] || '?';
       d.textContent = [
-        'v1.4.6  iOS ' + ver.replace(/_/g, '.') + '  fs=' + pfsOn + ' real=' + !!fsElement(),
+        'v1.4.7  iOS ' + ver.replace(/_/g, '.') + '  fs=' + pfsOn + ' real=' + !!fsElement(),
         'screen ' + screen.width + 'x' + screen.height + '  dpr ' + devicePixelRatio,
         'inner ' + innerWidth + 'x' + innerHeight + '  scrollY ' + Math.round(scrollY) + '  docH ' + document.documentElement.scrollHeight,
         'vv ' + (vv ? Math.round(vv.width) + 'x' + Math.round(vv.height) + ' top ' + Math.round(vv.offsetTop) + ' pageTop ' + Math.round(vv.pageTop) : '-'),
@@ -918,6 +944,7 @@
         'video  ' + box(v) + (v ? '  ' + v.videoWidth + 'x' + v.videoHeight : ''),
         'overlay ' + box(touchEl) + '  bar ' + box(touchEl.querySelector('.fpns-t-bot')),
         'view ' + view.s.toFixed(2) + 'x ' + view.x.toFixed(2) + ',' + view.y.toFixed(2) + '  banner ' + document.querySelectorAll('meta[name="apple-itunes-app"]').length,
+        ...clippers(v),
       ].join('\n');
     };
     fill();
@@ -1044,7 +1071,7 @@
         <div class="fpns-t-top">
           <button data-act="back" aria-label="Back">${ICON_BACK}</button>
           <span class="fpns-t-flex"></span>
-          <button data-act="info" class="fpns-t-ver" aria-label="Version and diagnostics">v1.4.6</button>
+          <button data-act="info" class="fpns-t-ver" aria-label="Version and diagnostics">v1.4.7</button>
           <button data-act="site" aria-label="Site controls">${ICON_MORE}</button>
           <button data-act="fs" aria-label="Full screen">${ICON_FS}</button>
         </div>
