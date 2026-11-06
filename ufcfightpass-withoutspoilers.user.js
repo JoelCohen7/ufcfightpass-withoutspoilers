@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         UFC Fight Pass Without Spoilers
 // @namespace    joel.fightpass.nospoilers
-// @version      1.4.3
+// @version      1.4.4
 // @description  Hides the duration and time remaining on UFC Fight Pass. Adds ±10 s / 30 s / 1 min / 5 min jumps and a fixed-scale seek bar with thumbnails. Works on computers and on iPhone/iPad (Safari + Userscripts).
 // @match        https://www.ufcfightpass.com/*
 // @match        https://ufcfightpass.com/*
@@ -743,11 +743,19 @@
     }
     /* Full screen inside the page (iPhone has no real full screen for anything but Safari's own player).
        Data attributes, not classes: React rewrites the class of its elements on every render. */
-    [data-fpns-pfs] { position: fixed !important; left: 0 !important; top: 0 !important; right: 0 !important; bottom: 0 !important;
-      width: 100vw !important; height: 100vh !important; height: 100dvh !important; max-width: none !important; max-height: none !important;
+    [data-fpns-pfs] { position: fixed !important; left: var(--fpns-vl, 0px) !important; top: var(--fpns-vt, 0px) !important;
+      right: auto !important; bottom: auto !important; width: var(--fpns-vw, 100vw) !important; height: var(--fpns-vh, 100dvh) !important;
+      max-width: none !important; max-height: none !important;
       min-height: 0 !important; margin: 0 !important; padding: 0 !important; z-index: 2147483600 !important; background: #000 !important;
       transform: none !important; border-radius: 0 !important; aspect-ratio: auto !important; }
     [data-fpns-pfs] video { object-fit: contain !important; }
+    /* the video and the boxes around it fill the player (the site sizes them for the old, smaller area) */
+    [data-fpns-pfs-fill] { position: absolute !important; top: 0 !important; left: 0 !important; right: auto !important; bottom: auto !important;
+      width: 100% !important; height: 100% !important; max-width: none !important; max-height: none !important; min-height: 0 !important;
+      margin: 0 !important; transform: none !important; }
+    /* pinch out = fill the screen (cropping a little), pinch in = whole picture */
+    html.fpns-fill [data-fpns-pfs] video, html.fpns-fill [data-fpns-surface]:fullscreen video,
+    html.fpns-fill [data-fpns-surface]:-webkit-full-screen video { object-fit: cover !important; }
     [data-fpns-pfs-anc] { transform: none !important; filter: none !important; contain: none !important; will-change: auto !important;
       perspective: none !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
       container-type: normal !important; z-index: 2147483600 !important; }
@@ -765,6 +773,7 @@
   };
 
   let touchEl = null;
+  let fillPref = !!lsGet('fpns:fill', false);   // pinched to fill the screen (remembered)
   // After one of our buttons acted, Safari's own click for that touch is dropped wherever it lands
   // (the layout may have changed under the finger, e.g. leaving full screen).
   let nativeClickOff = 0;
@@ -824,7 +833,13 @@
     document.querySelectorAll('[data-fpns-pfs-anc]').forEach((el) => { if (!anc.has(el)) el.removeAttribute('data-fpns-pfs-anc'); });
     if (r && !r.hasAttribute('data-fpns-pfs')) r.setAttribute('data-fpns-pfs', '');
     anc.forEach((a) => { if (!a.hasAttribute('data-fpns-pfs-anc')) a.setAttribute('data-fpns-pfs-anc', ''); });
+    const fill = new Set();
+    const v = r && TL.video();
+    for (let e = v; r && e && e !== r && r.contains(e); e = e.parentElement) fill.add(e);
+    document.querySelectorAll('[data-fpns-pfs-fill]').forEach((el) => { if (!fill.has(el)) el.removeAttribute('data-fpns-pfs-fill'); });
+    fill.forEach((e) => { if (!e.hasAttribute('data-fpns-pfs-fill')) e.setAttribute('data-fpns-pfs-fill', ''); });
     document.documentElement.classList.toggle('fpns-pfs-on', !!r);
+    fitToScreen();
     let room = document.getElementById('fpns-scrollroom');
     if (r && document.body && (!room || room.parentNode !== document.body || document.body.lastElementChild !== room)) {
       room = room || Object.assign(document.createElement('div'), { id: 'fpns-scrollroom' });
@@ -833,6 +848,22 @@
       room.remove();
     }
   }
+  // The player takes exactly the visible area, which grows when Safari hides its bars.
+  function fitToScreen() {
+    const st = document.documentElement.style;
+    if (!pfsOn) {
+      ['vl', 'vt', 'vw', 'vh'].forEach((k) => st.removeProperty('--fpns-' + k));
+      return;
+    }
+    const vv = window.visualViewport;
+    st.setProperty('--fpns-vl', (vv ? vv.offsetLeft : 0) + 'px');
+    st.setProperty('--fpns-vt', (vv ? vv.offsetTop : 0) + 'px');
+    st.setProperty('--fpns-vw', (vv ? vv.width : innerWidth) + 'px');
+    st.setProperty('--fpns-vh', (vv ? vv.height : innerHeight) + 'px');
+  }
+  ['resize', 'scroll', 'orientationchange'].forEach((ev) => window.addEventListener(ev, fitToScreen, { passive: true }));
+  try { ['resize', 'scroll'].forEach((ev) => window.visualViewport.addEventListener(ev, fitToScreen, { passive: true })); } catch {}
+
   // Safari's bars still showing? (the visible height is clearly less than the screen's)
   const safariBarsShown = () => {
     const landscape = innerWidth > innerHeight;
@@ -1050,6 +1081,7 @@
       return;
     }
     addTouchStyle();
+    if (document.documentElement.classList.contains('fpns-fill') !== fillPref) document.documentElement.classList.toggle('fpns-fill', fillPref);
     const h = playerRoot();
     if (!touchEl) touchEl = buildTouch();
     // Always the last child: the site's own layers may sit at the same (maximum) z-index, and the last one wins.
@@ -1172,6 +1204,35 @@
   };
   window.addEventListener('pointerup', (e) => fingerUp(e, false), true);
   window.addEventListener('pointercancel', (e) => fingerUp(e, true), true);
+  // Two fingers on the video: pinch out = fill the screen, pinch in = whole picture (shows in full screen).
+  let pinch = null;
+  const fingerGap = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  const setFill = (on) => {
+    fillPref = on;
+    document.documentElement.classList.toggle('fpns-fill', on);
+    lsSet('fpns:fill', on);
+    toast(on ? 'Fill screen' : 'Whole picture');
+  };
+  window.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 2 || !touchOn() || inOurUi(e.target)) return;
+    const r = playerRoot();
+    if (!r || !r.contains(e.target)) return;
+    pinch = { gap: fingerGap(e.touches), done: false };
+    if (tp) { clearTimeout(tp.timer); tp.moved = true; }
+  }, { capture: true, passive: false });
+  window.addEventListener('touchmove', (e) => {
+    if (!pinch || e.touches.length !== 2) return;
+    if (e.cancelable) e.preventDefault();            // no page zoom
+    const ratio = fingerGap(e.touches) / (pinch.gap || 1);
+    if (pinch.done) return;
+    const fillNow = document.documentElement.classList.contains('fpns-fill');
+    if (ratio > 1.2 && !fillNow) { setFill(true); pinch.done = true; }
+    else if (ratio < 0.83 && fillNow) { setFill(false); pinch.done = true; }
+  }, { capture: true, passive: false });
+  ['touchend', 'touchcancel'].forEach((type) => window.addEventListener(type, (e) => {
+    if (pinch && e.touches.length < 2) pinch = null;
+  }, { capture: true }));
+
   // Outside full screen the page can still be scrolled with a finger on the video (touch-action: pan-y);
   // ending the touch is cancelled, so Safari doesn't turn it into a click for the site.
   ['touchstart', 'touchmove', 'touchend', 'touchcancel'].forEach((type) => window.addEventListener(type, (e) => {
