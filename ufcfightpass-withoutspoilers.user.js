@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         UFC Fight Pass Without Spoilers
 // @namespace    joel.fightpass.nospoilers
-// @version      1.4.4
+// @version      1.4.5
 // @description  Hides the duration and time remaining on UFC Fight Pass. Adds ±10 s / 30 s / 1 min / 5 min jumps and a fixed-scale seek bar with thumbnails. Works on computers and on iPhone/iPad (Safari + Userscripts).
 // @match        https://www.ufcfightpass.com/*
 // @match        https://ufcfightpass.com/*
@@ -753,9 +753,11 @@
     [data-fpns-pfs-fill] { position: absolute !important; top: 0 !important; left: 0 !important; right: auto !important; bottom: auto !important;
       width: 100% !important; height: 100% !important; max-width: none !important; max-height: none !important; min-height: 0 !important;
       margin: 0 !important; transform: none !important; }
-    /* pinch out = fill the screen (cropping a little), pinch in = whole picture */
-    html.fpns-fill [data-fpns-pfs] video, html.fpns-fill [data-fpns-surface]:fullscreen video,
-    html.fpns-fill [data-fpns-surface]:-webkit-full-screen video { object-fit: cover !important; }
+    /* two fingers in full screen: zoom and move the picture freely */
+    html.fpns-pfs-on [data-fpns-pfs] video, html [data-fpns-surface]:fullscreen video, html [data-fpns-surface]:-webkit-full-screen video {
+      transform: translate(var(--fpns-zx, 0px), var(--fpns-zy, 0px)) scale(var(--fpns-zs, 1)) !important; transform-origin: 50% 50% !important;
+      transition: none !important; }
+    #fpns-touch .fpns-t-ver { font-size: 11px; opacity: .45; padding: 0 6px; }
     [data-fpns-pfs-anc] { transform: none !important; filter: none !important; contain: none !important; will-change: auto !important;
       perspective: none !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
       container-type: normal !important; z-index: 2147483600 !important; }
@@ -773,7 +775,8 @@
   };
 
   let touchEl = null;
-  let fillPref = !!lsGet('fpns:fill', false);   // pinched to fill the screen (remembered)
+  // Zoom and position of the picture in full screen (x, y: share of the screen), set with two fingers; remembered.
+  let view = Object.assign({ s: 1, x: 0, y: 0 }, lsGet('fpns:view', null) || {});
   // After one of our buttons acted, Safari's own click for that touch is dropped wherever it lands
   // (the layout may have changed under the finger, e.g. leaving full screen).
   let nativeClickOff = 0;
@@ -860,6 +863,14 @@
     st.setProperty('--fpns-vt', (vv ? vv.offsetTop : 0) + 'px');
     st.setProperty('--fpns-vw', (vv ? vv.width : innerWidth) + 'px');
     st.setProperty('--fpns-vh', (vv ? vv.height : innerHeight) + 'px');
+    applyView();
+  }
+  function applyView() {
+    const st = document.documentElement.style;
+    const vv = window.visualViewport;
+    st.setProperty('--fpns-zs', String(view.s));
+    st.setProperty('--fpns-zx', Math.round(view.x * (vv ? vv.width : innerWidth)) + 'px');
+    st.setProperty('--fpns-zy', Math.round(view.y * (vv ? vv.height : innerHeight)) + 'px');
   }
   ['resize', 'scroll', 'orientationchange'].forEach((ev) => window.addEventListener(ev, fitToScreen, { passive: true }));
   try { ['resize', 'scroll'].forEach((ev) => window.visualViewport.addEventListener(ev, fitToScreen, { passive: true })); } catch {}
@@ -984,6 +995,7 @@
         <div class="fpns-t-top">
           <button data-act="back" aria-label="Back">${ICON_BACK}</button>
           <span class="fpns-t-flex"></span>
+          <span class="fpns-t-ver">v1.4.5</span>
           <button data-act="site" aria-label="Site controls">${ICON_MORE}</button>
           <button data-act="fs" aria-label="Full screen">${ICON_FS}</button>
         </div>
@@ -1081,7 +1093,7 @@
       return;
     }
     addTouchStyle();
-    if (document.documentElement.classList.contains('fpns-fill') !== fillPref) document.documentElement.classList.toggle('fpns-fill', fillPref);
+    if (!document.documentElement.style.getPropertyValue('--fpns-zs')) applyView();
     const h = playerRoot();
     if (!touchEl) touchEl = buildTouch();
     // Always the last child: the site's own layers may sit at the same (maximum) z-index, and the last one wins.
@@ -1204,33 +1216,42 @@
   };
   window.addEventListener('pointerup', (e) => fingerUp(e, false), true);
   window.addEventListener('pointercancel', (e) => fingerUp(e, true), true);
-  // Two fingers on the video: pinch out = fill the screen, pinch in = whole picture (shows in full screen).
+  // Two fingers on the video (full screen): pinch = zoom, drag = move the picture. Pinching below the original
+  // size puts it back as it was.
   let pinch = null;
   const fingerGap = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
-  const setFill = (on) => {
-    fillPref = on;
-    document.documentElement.classList.toggle('fpns-fill', on);
-    lsSet('fpns:fill', on);
-    toast(on ? 'Fill screen' : 'Whole picture');
-  };
+  const fingerMid = (t) => ({ x: (t[0].clientX + t[1].clientX) / 2, y: (t[0].clientY + t[1].clientY) / 2 });
+  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
   window.addEventListener('touchstart', (e) => {
-    if (e.touches.length !== 2 || !touchOn() || inOurUi(e.target)) return;
+    if (e.touches.length !== 2 || !touchOn() || !isFs() || inOurUi(e.target)) return;
     const r = playerRoot();
     if (!r || !r.contains(e.target)) return;
-    pinch = { gap: fingerGap(e.touches), done: false };
+    if (e.cancelable) e.preventDefault();            // no page scroll / zoom with two fingers
+    pinch = { gap: fingerGap(e.touches) || 1, mid: fingerMid(e.touches), s: view.s, x: view.x, y: view.y, small: false };
     if (tp) { clearTimeout(tp.timer); tp.moved = true; }
   }, { capture: true, passive: false });
   window.addEventListener('touchmove', (e) => {
     if (!pinch || e.touches.length !== 2) return;
-    if (e.cancelable) e.preventDefault();            // no page zoom
-    const ratio = fingerGap(e.touches) / (pinch.gap || 1);
-    if (pinch.done) return;
-    const fillNow = document.documentElement.classList.contains('fpns-fill');
-    if (ratio > 1.2 && !fillNow) { setFill(true); pinch.done = true; }
-    else if (ratio < 0.83 && fillNow) { setFill(false); pinch.done = true; }
+    if (e.cancelable) e.preventDefault();
+    const vv = window.visualViewport;
+    const W = vv ? vv.width : innerWidth, H = vv ? vv.height : innerHeight;
+    const m = fingerMid(e.touches);
+    const s = pinch.s * fingerGap(e.touches) / pinch.gap;
+    pinch.small = s < 0.92;
+    view.s = clamp(s, 1, 4);
+    view.x = clamp(pinch.x + (m.x - pinch.mid.x) / W, -1, 1);
+    view.y = clamp(pinch.y + (m.y - pinch.mid.y) / H, -1, 1);
+    applyView();
   }, { capture: true, passive: false });
   ['touchend', 'touchcancel'].forEach((type) => window.addEventListener(type, (e) => {
-    if (pinch && e.touches.length < 2) pinch = null;
+    if (!pinch || e.touches.length >= 2) return;
+    if (pinch.small) {
+      view = { s: 1, x: 0, y: 0 };
+      applyView();
+      toast('Original view');
+    }
+    pinch = null;
+    lsSet('fpns:view', view);
   }, { capture: true }));
 
   // Outside full screen the page can still be scrolled with a finger on the video (touch-action: pan-y);
