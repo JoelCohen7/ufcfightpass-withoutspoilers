@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         UFC Fight Pass Without Spoilers
 // @namespace    joel.fightpass.nospoilers
-// @version      1.4.2
+// @version      1.4.3
 // @description  Hides the duration and time remaining on UFC Fight Pass. Adds ±10 s / 30 s / 1 min / 5 min jumps and a fixed-scale seek bar with thumbnails. Works on computers and on iPhone/iPad (Safari + Userscripts).
 // @match        https://www.ufcfightpass.com/*
 // @match        https://ufcfightpass.com/*
@@ -233,7 +233,7 @@
     manualPage = null;
   }
 
-  function toast(text) {
+  function toast(text, ms) {
     const host = document.querySelector('.dice-player-background') || document.body;
     let el = host.querySelector(':scope > .fpns-toast');
     if (!el) {
@@ -244,7 +244,7 @@
     el.textContent = text;
     el.classList.add('on');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => el.classList.remove('on'), 650);
+    toastTimer = setTimeout(() => el.classList.remove('on'), ms || 650);
   }
 
   function jump(sec) {
@@ -696,9 +696,8 @@
       font: 14px/1.2 -apple-system, "Helvetica Neue", Arial, sans-serif; -webkit-tap-highlight-color: transparent;
       -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
     html.fpns-touch #fpns-touch { display: block; }
-    html.fpns-touch .fpns-surface, html.fpns-touch .fpns-surface * { touch-action: pan-y; -webkit-user-select: none; user-select: none;
+    html.fpns-touch [data-fpns-surface], html.fpns-touch [data-fpns-surface] * { touch-action: pan-y; -webkit-user-select: none; user-select: none;
       -webkit-touch-callout: none; }
-    html.fpns-touch [data-fpns-pfs], html.fpns-touch [data-fpns-pfs] * { touch-action: none; }
     html.fpns-touch #fpns-touch button, html.fpns-touch #fpns-touch .fpns-btn { touch-action: manipulation; }
     html.fpns-touch #fpns-touch .fpns-bar { touch-action: none; }
     #fpns-touch .fpns-t-layer { position: absolute; inset: 0; opacity: 0; transition: opacity .2s; pointer-events: none; }
@@ -752,7 +751,10 @@
     [data-fpns-pfs-anc] { transform: none !important; filter: none !important; contain: none !important; will-change: auto !important;
       perspective: none !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
       container-type: normal !important; z-index: 2147483600 !important; }
-    html.fpns-pfs-on, html.fpns-pfs-on body { overflow: hidden !important; }
+    /* iPhone: Safari only hides its bars when the page scrolls, so in full screen the page gets room to scroll
+       (the player stays fixed on top) and a swipe up on the video scrolls it */
+    html.fpns-pfs-on, html.fpns-pfs-on body { overflow-y: auto !important; }
+    #fpns-scrollroom { height: 100vh; pointer-events: none; }
   `;
   const addTouchStyle = () => {
     if (document.getElementById('fpns-tstyle')) return;
@@ -823,20 +825,39 @@
     if (r && !r.hasAttribute('data-fpns-pfs')) r.setAttribute('data-fpns-pfs', '');
     anc.forEach((a) => { if (!a.hasAttribute('data-fpns-pfs-anc')) a.setAttribute('data-fpns-pfs-anc', ''); });
     document.documentElement.classList.toggle('fpns-pfs-on', !!r);
+    let room = document.getElementById('fpns-scrollroom');
+    if (r && document.body && (!room || room.parentNode !== document.body || document.body.lastElementChild !== room)) {
+      room = room || Object.assign(document.createElement('div'), { id: 'fpns-scrollroom' });
+      document.body.appendChild(room);
+    } else if (!r && room) {
+      room.remove();
+    }
+  }
+  // Safari's bars still showing? (the visible height is clearly less than the screen's)
+  const safariBarsShown = () => {
+    const landscape = innerWidth > innerHeight;
+    const full = landscape ? Math.min(screen.width, screen.height) : Math.max(screen.width, screen.height);
+    return innerHeight < full - (landscape ? 24 : 120);
+  };
+  function hideBarsHint() {
+    if (!IOS || fsElement()) return;
+    try { window.scrollTo(0, 1); } catch {}
+    setTimeout(() => { if (pfsOn && safariBarsShown()) toast('Swipe up to hide Safari\'s bar', 2500); }, 400);
   }
   function enterPfs(r) {
     if (!r || pfsOn) return;
     pfsOn = true;
     pfsAuto = false;
     applyPfs();
-    try { window.scrollTo(0, 0); } catch {}
     window.dispatchEvent(new Event('resize'));
     touchIcons();
+    hideBarsHint();
   }
   function exitPfs() {
     if (!pfsOn) return;
     pfsOn = false;
     applyPfs();
+    try { window.scrollTo(0, 0); } catch {}
     window.dispatchEvent(new Event('resize'));
     touchIcons();
   }
@@ -874,6 +895,16 @@
   try { phoneLandscape.addEventListener('change', onRotate); } catch { try { phoneLandscape.addListener(onRotate); } catch {} }
 
   if (IOS) {
+    // Safari's "Open in the app" banner takes screen space: the site's meta tag for it gets another name.
+    try {
+      const origSetAttribute = Element.prototype.setAttribute;
+      Element.prototype.setAttribute = function (name, value) {
+        if (this.tagName === 'META' && String(name).toLowerCase() === 'name' && String(value).toLowerCase() === 'apple-itunes-app') {
+          value = 'apple-itunes-app-off';
+        }
+        return origSetAttribute.call(this, name, value);
+      };
+    } catch {}
     // The site asks Safari for its own full-screen player (or a full-screen <video>): give it ours instead.
     const VP = HTMLVideoElement.prototype;
     ['webkitEnterFullscreen', 'webkitEnterFullScreen', 'requestFullscreen', 'webkitRequestFullscreen', 'webkitRequestFullScreen'].forEach((name) => {
@@ -1025,8 +1056,8 @@
     if (touchEl.parentNode !== h || h.lastElementChild !== touchEl) {
       if (getComputedStyle(h).position === 'static') h.style.position = 'relative';
       h.appendChild(touchEl);
-      h.classList.add('fpns-surface');
     }
+    if (!h.hasAttribute('data-fpns-surface')) h.setAttribute('data-fpns-surface', '');
     if (!touchOn()) {
       document.documentElement.classList.add('fpns-touch');
       setUi(true);
@@ -1148,7 +1179,7 @@
     if (inOurUi(e.target)) return;
     if (!(onTouchSurface(e) || (type !== 'touchstart' && (tp || Date.now() < touchSwallow) && r && r.contains(e.target)))) return;
     e.stopImmediatePropagation();
-    if (e.cancelable && (pfsOn || type === 'touchend')) e.preventDefault();
+    if (e.cancelable && type === 'touchend') e.preventDefault();
   }, { capture: true, passive: false }));
   ['mousedown', 'mouseup', 'click', 'dblclick', 'contextmenu'].forEach((type) => window.addEventListener(type, (e) => {
     if (Date.now() < touchSwallow && onTouchSurface(e)) swallowEvent(e);
